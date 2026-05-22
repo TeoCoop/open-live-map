@@ -1,112 +1,172 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import { Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { Collapsible } from '@/components/ui/collapsible';
-import { ExternalLink } from '@/components/external-link';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Fonts } from '@/constants/theme';
+const UMAP_URL = 'https://umap.openstreetmap.fr/';
 
-export default function TabTwoScreen() {
+const STEPS = [
+  {
+    n: 1,
+    title: 'Creá tu mapa en uMap',
+    body: 'Abrí umap.openstreetmap.fr en tu navegador. No necesitás cuenta — podés crear un mapa temporal de forma instantánea.',
+    action: { label: 'Abrir uMap ↗', url: UMAP_URL },
+  },
+  {
+    n: 2,
+    title: 'Marcá los puntos de interés',
+    body: 'Usá la herramienta de punto para agregar cada lugar que querés ver en AR. Dale un nombre descriptivo y elegí un color para identificarlo fácilmente.',
+  },
+  {
+    n: 3,
+    title: 'Descargá el archivo GeoJSON',
+    body: 'En el menú del mapa andá a Acciones avanzadas → Descargar datos. Elegí el formato GeoJSON y guardá el archivo en tu dispositivo.',
+  },
+  {
+    n: 4,
+    title: 'Cargá el archivo en la app',
+    body: 'Volvé a la pantalla Mapa y tocá "+ Cargar mapa". Podés cargar varios archivos GeoJSON a la vez.',
+  },
+  {
+    n: 5,
+    title: 'Seleccioná y explorá en AR',
+    body: 'Desplegá cada archivo para ver sus puntos. Tildá los que querés ver, tocá "Ver (N)" y apuntá la cámara hacia esos lugares para verlos en realidad aumentada.',
+  },
+] as const;
+
+const STEP_COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30'];
+
+export default function HowToScreen() {
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
-      headerImage={
-        <IconSymbol
-          size={310}
-          color="#808080"
-          name="chevron.left.forwardslash.chevron.right"
-          style={styles.headerImage}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText
-          type="title"
-          style={{
-            fontFamily: Fonts.rounded,
-          }}>
-          Explore
-        </ThemedText>
-      </ThemedView>
-      <ThemedText>This app includes example code to help you get started.</ThemedText>
-      <Collapsible title="File-based routing">
-        <ThemedText>
-          This app has two screens:{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">app/(tabs)/explore.tsx</ThemedText>
-        </ThemedText>
-        <ThemedText>
-          The layout file in <ThemedText type="defaultSemiBold">app/(tabs)/_layout.tsx</ThemedText>{' '}
-          sets up the tab navigator.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/router/introduction">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Android, iOS, and web support">
-        <ThemedText>
-          You can open this project on Android, iOS, and the web. To open the web version, press{' '}
-          <ThemedText type="defaultSemiBold">w</ThemedText> in the terminal running this project.
-        </ThemedText>
-      </Collapsible>
-      <Collapsible title="Images">
-        <ThemedText>
-          For static images, you can use the <ThemedText type="defaultSemiBold">@2x</ThemedText> and{' '}
-          <ThemedText type="defaultSemiBold">@3x</ThemedText> suffixes to provide files for
-          different screen densities
-        </ThemedText>
-        <Image
-          source={require('@/assets/images/react-logo.png')}
-          style={{ width: 100, height: 100, alignSelf: 'center' }}
-        />
-        <ExternalLink href="https://reactnative.dev/docs/images">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Light and dark mode components">
-        <ThemedText>
-          This template has light and dark mode support. The{' '}
-          <ThemedText type="defaultSemiBold">useColorScheme()</ThemedText> hook lets you inspect
-          what the user&apos;s current color scheme is, and so you can adjust UI colors accordingly.
-        </ThemedText>
-        <ExternalLink href="https://docs.expo.dev/develop/user-interface/color-themes/">
-          <ThemedText type="link">Learn more</ThemedText>
-        </ExternalLink>
-      </Collapsible>
-      <Collapsible title="Animations">
-        <ThemedText>
-          This template includes an example of an animated component. The{' '}
-          <ThemedText type="defaultSemiBold">components/HelloWave.tsx</ThemedText> component uses
-          the powerful{' '}
-          <ThemedText type="defaultSemiBold" style={{ fontFamily: Fonts.mono }}>
-            react-native-reanimated
-          </ThemedText>{' '}
-          library to create a waving hand animation.
-        </ThemedText>
-        {Platform.select({
-          ios: (
-            <ThemedText>
-              The <ThemedText type="defaultSemiBold">components/ParallaxScrollView.tsx</ThemedText>{' '}
-              component provides a parallax effect for the header image.
-            </ThemedText>
-          ),
-        })}
-      </Collapsible>
-    </ParallaxScrollView>
+    <ScrollView
+      style={styles.screen}
+      contentContainerStyle={styles.content}
+      showsVerticalScrollIndicator={false}
+    >
+      <Text style={styles.title}>Cómo usar la app</Text>
+      <Text style={styles.subtitle}>
+        Seguí estos pasos para ver tus puntos de interés en realidad aumentada.
+      </Text>
+
+      {STEPS.map((step, i) => (
+        <View key={step.n} style={styles.card}>
+          <View style={[styles.stepBadge, { backgroundColor: STEP_COLORS[i] }]}>
+            <Text style={styles.stepNumber}>{step.n}</Text>
+          </View>
+          <View style={styles.cardBody}>
+            <Text style={styles.stepTitle}>{step.title}</Text>
+            <Text style={styles.stepBody}>{step.body}</Text>
+            {'action' in step && step.action && (
+              <Pressable
+                style={styles.linkButton}
+                onPress={() => Linking.openURL(step.action!.url)}
+              >
+                <Text style={styles.linkButtonText}>{step.action.label}</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      ))}
+
+      <View style={styles.tip}>
+        <Text style={styles.tipTitle}>Consejo</Text>
+        <Text style={styles.tipBody}>
+          Cuanto más cerca estés de los puntos que marcaste, mejor funciona la precisión del GPS.
+          Funciona mejor en espacios abiertos con buena señal.
+        </Text>
+      </View>
+    </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
-  headerImage: {
-    color: '#808080',
-    bottom: -90,
-    left: -35,
-    position: 'absolute',
+  screen: {
+    flex: 1,
+    backgroundColor: '#f0f0f5',
   },
-  titleContainer: {
+  content: {
+    padding: 20,
+    paddingTop: 72,
+    paddingBottom: 48,
+    gap: 12,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 15,
+    color: '#666',
+    lineHeight: 22,
+    marginBottom: 8,
+  },
+
+  card: {
+    backgroundColor: '#fff',
+    borderRadius: 14,
+    padding: 16,
     flexDirection: 'row',
-    gap: 8,
+    gap: 14,
+    alignItems: 'flex-start',
+  },
+  stepBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexShrink: 0,
+    marginTop: 1,
+  },
+  stepNumber: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  cardBody: {
+    flex: 1,
+    gap: 6,
+  },
+  stepTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1a1a1a',
+  },
+  stepBody: {
+    fontSize: 14,
+    color: '#555',
+    lineHeight: 20,
+  },
+  linkButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  linkButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  tip: {
+    backgroundColor: '#FFF8E7',
+    borderRadius: 14,
+    padding: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9500',
+    gap: 4,
+    marginTop: 4,
+  },
+  tipTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#996000',
+  },
+  tipBody: {
+    fontSize: 14,
+    color: '#664400',
+    lineHeight: 20,
   },
 });
