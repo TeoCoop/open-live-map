@@ -61,8 +61,9 @@ class ArErrorBoundary extends Component<
 const FOV_H = 60;
 const FOV_V = 80;
 const EARTH_RADIUS = 6_371_000;
-const EMA = 0.08;
-const H_BUF = 10;
+const EMA = 0.05;
+const EMA_SCREEN = 0.12;
+const H_BUF = 20;
 const P_BUF = 8;
 
 const CARD_W = 148;
@@ -114,6 +115,11 @@ function smoothAngle(cur: number, tgt: number, a: number): number {
 
 function formatDist(m: number) {
   return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
+function toCardinal(deg: number): string {
+  const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SO', 'O', 'NO'];
+  return dirs[Math.round(((deg % 360) + 360) % 360 / 45) % 8];
 }
 
 // ── AR projection ──────────────────────────────────────────────────────────────
@@ -313,6 +319,40 @@ const EdgeIndicator = memo(function EdgeIndicator({
   );
 });
 
+// ── Compass HUD ────────────────────────────────────────────────────────────────
+function CompassHud({ heading }: { heading: number }) {
+  const cardinal = toCardinal(heading);
+  return (
+    <View style={styles.compassPill} pointerEvents="none">
+      <View style={styles.compassRose}>
+        <Text style={styles.compassCardinal}>{cardinal}</Text>
+      </View>
+      <Text style={styles.compassDeg}>{heading}°</Text>
+    </View>
+  );
+}
+
+// ── GPS HUD ────────────────────────────────────────────────────────────────────
+function GpsHud({ coords, accuracy }: { coords: { lat: number; lng: number }; accuracy: number | null }) {
+  const accColor = accuracy == null ? 'rgba(255,255,255,0.4)'
+    : accuracy <= 10 ? '#30D158'
+    : accuracy <= 30 ? '#FFD60A'
+    : '#FF453A';
+  return (
+    <View style={styles.gpsPill} pointerEvents="none">
+      <Text style={styles.gpsCoords}>
+        {coords.lat.toFixed(5)}{'  '}{coords.lng.toFixed(5)}
+      </Text>
+      <View style={styles.gpsAccRow}>
+        <View style={[styles.gpsAccDot, { backgroundColor: accColor }]} />
+        <Text style={[styles.gpsAccText, { color: accColor }]}>
+          {accuracy != null ? `±${Math.round(accuracy)} m` : 'Sin precisión'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 // ── Guide button ───────────────────────────────────────────────────────────────
 function GuideButton({ onPress, active, color }: { onPress: () => void; active: boolean; color: string | null }) {
   return (
@@ -438,15 +478,21 @@ function ArScreen() {
   const [navPointId, setNavPointId] = useState<string | null>(null);
   const [navData, setNavData] = useState<NavData | null>(null);
   const [listPoints, setListPoints] = useState<PointWithDist[]>([]);
+  const [compassHeading, setCompassHeading] = useState(0);
+  const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
 
   const headingBuf = useRef<number[]>([]);
   const pitchBuf = useRef<number[]>([]);
   // Start at 0 so the loop runs immediately — sensors refine the value as they fire
   const headingSmooth = useRef(0);
   const pitchSmooth = useRef(0);
+  const smoothPosRef = useRef<Map<string, { sx: number; sy: number }>>(new Map());
   const userLocRef = useRef<{ lat: number; lng: number } | null>(null);
   const pointsRef = useRef<GeoPoint[]>([]);
   const navPointRef = useRef<GeoPoint | null>(null);
+  // Tracks best GPS accuracy seen this session — used to filter regressions
+  const bestAccuracyRef = useRef<number>(Infinity);
 
   const { visiblePoints } = useGeoData();
   const { width, height } = useWindowDimensions();
@@ -478,25 +524,46 @@ function ArScreen() {
   // GPS + compass
   useEffect(() => {
     if (!locationGranted) return;
-    Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced, // faster on Android, good enough for AR
-    }).then((loc) => {
-      userLocRef.current = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-      setLocationReady(true);
-      setSensorStatus('GPS listo');
-    }).catch(() => {
-      // Try with lowest accuracy as fallback
-      Location.getLastKnownPositionAsync().then((loc) => {
-        if (loc) {
-          userLocRef.current = { lat: loc.coords.latitude, lng: loc.coords.longitude };
-          setLocationReady(true);
-          setSensorStatus('GPS (caché)');
-        } else {
-          setSensorStatus('Sin GPS — verificá que el GPS esté activado');
-        }
-      }).catch(() => { setSensorStatus('Error de GPS'); });
-    });
+
+    // Helper: apply position only if it doesn't regress accuracy by more than 50%
+    function applyPosition(lat: number, lng: number, accuracy: number | null | undefined) {
+      const acc = accuracy ?? Infinity;
+      const best = bestAccuracyRef.current;
+      // Block readings that are dramatically worse (likely a bad cell-tower fallback)
+      if (acc > best * 1.5) return;
+      if (acc < best) bestAccuracyRef.current = acc;
+      userLocRef.current = { lat, lng };
+      setUserCoords({ lat, lng });
+      setGpsAccuracy(acc === Infinity ? null : acc);
+      const label = acc <= 15 ? 'GPS preciso' : acc <= 40 ? 'GPS listo' : `Adquiriendo satélites…`;
+      setSensorStatus(label);
+    }
+
+    // Fast initial fix with Balanced so AR starts quickly (High/BestForNavigation can
+    // take 30+ seconds to resolve on cold start). The continuous watch refines it.
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
+      .then((loc) => {
+        applyPosition(loc.coords.latitude, loc.coords.longitude, loc.coords.accuracy);
+        setLocationReady(true);
+      })
+      .catch(() => {
+        // Fallback to last known position so AR isn't stuck on loading
+        Location.getLastKnownPositionAsync()
+          .then((loc) => {
+            if (loc) {
+              applyPosition(loc.coords.latitude, loc.coords.longitude, loc.coords.accuracy);
+              setLocationReady(true);
+              setSensorStatus('GPS (caché) — mejorando…');
+            } else {
+              setSensorStatus('Sin GPS — verificá que el GPS esté activado');
+            }
+          })
+          .catch(() => { setSensorStatus('Error de GPS'); });
+      });
+
     let headingSub: Location.LocationSubscription | null = null;
+    let posSub: Location.LocationSubscription | null = null;
+
     Location.watchHeadingAsync((h) => {
       try {
         const deg = h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
@@ -504,8 +571,15 @@ function ArScreen() {
         headingBuf.current.push(deg);
         if (headingBuf.current.length > H_BUF) headingBuf.current.shift();
       } catch { /* ignore bad sensor reading */ }
-    }).then((s) => { headingSub = s; }).catch(() => {/* heading unavailable */});
-    return () => { headingSub?.remove(); };
+    }).then((s) => { headingSub = s; }).catch(() => {});
+
+    // High-accuracy continuous watch — refines position as satellite lock improves
+    Location.watchPositionAsync(
+      { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 2, timeInterval: 1500 },
+      (loc) => { applyPosition(loc.coords.latitude, loc.coords.longitude, loc.coords.accuracy); },
+    ).then((s) => { posSub = s; }).catch(() => {});
+
+    return () => { headingSub?.remove(); posSub?.remove(); };
   }, [locationGranted]);
 
   // DeviceMotion at 5 Hz (pitch only; Android 12+ enforces 200ms min)
@@ -547,14 +621,33 @@ function ArScreen() {
         const h = headingSmooth.current;
         const p = pitchSmooth.current;
 
-        setProjected(
-          pointsRef.current.length > 0
-            ? computeProjected(pointsRef.current, loc.lat, loc.lng, h, p, width, height)
-            : [],
-        );
+        const raw = pointsRef.current.length > 0
+          ? computeProjected(pointsRef.current, loc.lat, loc.lng, h, p, width, height)
+          : [];
+
+        // Screen-space EMA: smooth (sx, sy) per point to eliminate residual pixel jitter
+        const smoothed = raw.map((pt) => {
+          const prev = smoothPosRef.current.get(pt.id);
+          if (!prev) {
+            smoothPosRef.current.set(pt.id, { sx: pt.sx, sy: pt.sy });
+            return pt;
+          }
+          const sx = prev.sx + EMA_SCREEN * (pt.sx - prev.sx);
+          const sy = prev.sy + EMA_SCREEN * (pt.sy - prev.sy);
+          smoothPosRef.current.set(pt.id, { sx, sy });
+          return { ...pt, sx, sy };
+        });
+        // Remove entries for points that left the FOV
+        const visibleIds = new Set(raw.map((pt) => pt.id));
+        for (const id of smoothPosRef.current.keys()) {
+          if (!visibleIds.has(id)) smoothPosRef.current.delete(id);
+        }
+
+        setProjected(smoothed);
 
         const np = navPointRef.current;
         setNavData(np ? computeNavData(np, loc.lat, loc.lng, h, p, width, height) : null);
+        setCompassHeading(Math.round(headingSmooth.current));
       } catch { /* never let a frame error crash the loop */ }
     }, 33);
     return () => clearInterval(loop);
@@ -629,6 +722,10 @@ function ArScreen() {
           </Text>
         </View>
       )}
+
+      {/* Compass + GPS HUD (top-left) */}
+      <CompassHud heading={compassHeading} />
+      {userCoords && <GpsHud coords={userCoords} accuracy={gpsAccuracy} />}
 
       {/* Top controls */}
       <Pressable style={styles.closeBtn} onPress={() => router.back()}>
@@ -840,6 +937,50 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   navCancelText: { color: 'rgba(255,255,255,0.7)', fontSize: 14, fontWeight: '600' },
+
+  // ── Compass HUD ────────────────────────────────────────────────────────────
+  compassPill: {
+    position: 'absolute',
+    top: 62,
+    left: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+  },
+  compassRose: {
+    width: 32, height: 32, borderRadius: 16,
+    borderWidth: 1.5,
+    borderColor: 'rgba(255,255,255,0.25)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  compassCardinal: { color: '#fff', fontSize: 13, fontWeight: '800', letterSpacing: 0.5 },
+  compassDeg: { color: 'rgba(255,255,255,0.6)', fontSize: 13, fontWeight: '500' },
+
+  // ── GPS HUD ────────────────────────────────────────────────────────────────
+  gpsPill: {
+    position: 'absolute',
+    top: 116,
+    left: 20,
+    backgroundColor: 'rgba(0,0,0,0.58)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 14,
+    gap: 4,
+  },
+  gpsCoords: {
+    color: 'rgba(255,255,255,0.85)',
+    fontSize: 11,
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 0.3,
+  },
+  gpsAccRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  gpsAccDot: { width: 6, height: 6, borderRadius: 3 },
+  gpsAccText: { fontSize: 11, fontWeight: '600' },
 
   // ── Misc ───────────────────────────────────────────────────────────────────
   statusWrap: { position: 'absolute', bottom: 100, alignSelf: 'center' },
