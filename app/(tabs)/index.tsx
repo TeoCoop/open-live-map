@@ -198,6 +198,10 @@ export default function HomeScreen() {
           <Text style={styles.loadButtonText}>+ Cargar mapa</Text>
         </Pressable>
 
+        <Pressable style={styles.markButton} onPress={() => router.push('/mark-point')}>
+          <Text style={styles.markButtonText}>📍 Marcar puntos en mapa</Text>
+        </Pressable>
+
         {files.map((file) => {
           const expanded = expandedIds.has(file.id);
           const selState = fileSelectionState(file, selectedIds);
@@ -304,6 +308,21 @@ const styles = StyleSheet.create({
   },
   loadButtonText: {
     color: '#007AFF',
+    fontSize: 17,
+    fontWeight: '600',
+  },
+
+  // Mark button
+  markButton: {
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#34C759',
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  markButtonText: {
+    color: '#34C759',
     fontSize: 17,
     fontWeight: '600',
   },

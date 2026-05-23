@@ -488,6 +488,7 @@ function ArScreen() {
   const headingSmooth = useRef(0);
   const pitchSmooth = useRef(0);
   const smoothPosRef = useRef<Map<string, { sx: number; sy: number }>>(new Map());
+  const gyroRateRef = useRef(0); // deg/s from DeviceMotion rotationRate.alpha
   const userLocRef = useRef<{ lat: number; lng: number } | null>(null);
   const pointsRef = useRef<GeoPoint[]>([]);
   const navPointRef = useRef<GeoPoint | null>(null);
@@ -598,6 +599,12 @@ function ArScreen() {
               const clamped = Math.max(-89, Math.min(89, pitch));
               pitchBuf.current.push(clamped);
               if (pitchBuf.current.length > P_BUF) pitchBuf.current.shift();
+              // Gyroscope rate for complementary filter (deg/s, clamped to avoid glitches)
+              // W3C convention: alpha increases CCW → negate so CW = positive heading change
+              const rate = data.rotationRate?.alpha ?? 0;
+              if (isFinite(rate) && rate !== 0) {
+                gyroRateRef.current = Math.max(-500, Math.min(500, -rate));
+              }
             } catch { /* ignore bad reading */ }
           });
         } catch { /* DeviceMotion setup failed — pitch stays 0 */ }
@@ -610,9 +617,13 @@ function ArScreen() {
   useEffect(() => {
     const loop = setInterval(() => {
       try {
-        // Pure compass heading: smooth the magnetometer buffer with EMA
-        if (headingBuf.current.length > 0)
-          headingSmooth.current = smoothAngle(headingSmooth.current, circularMean(headingBuf.current), EMA);
+        if (headingBuf.current.length > 0) {
+          // Complementary filter: gyroscope handles frame-to-frame smoothness,
+          // magnetometer corrects long-term drift (3% per frame ≈ full correction in ~1 s)
+          const gyroDelta = gyroRateRef.current * 0.033; // deg/s × 33 ms loop step
+          const gyroPredict = headingSmooth.current + gyroDelta;
+          headingSmooth.current = smoothAngle(gyroPredict, circularMean(headingBuf.current), 0.03);
+        }
         if (pitchBuf.current.length > 1)
           pitchSmooth.current += EMA * (windowMean(pitchBuf.current) - pitchSmooth.current);
 
