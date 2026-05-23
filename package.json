@@ -1,5 +1,5 @@
 {
-  "name": "live-map",
+  "name": "open-live-map",
   "main": "expo-router/entry",
   "version": "1.0.0",
   "scripts": {
