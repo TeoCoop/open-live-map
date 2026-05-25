@@ -1,3 +1,16 @@
+import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as Location from 'expo-location';
+import { router } from 'expo-router';
+import { DeviceMotion } from 'expo-sensors';
+import { Component, memo, useEffect, useRef, useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import Animated, {
   cancelAnimation,
   Easing,
@@ -6,19 +19,7 @@ import Animated, {
   withRepeat,
   withTiming,
 } from 'react-native-reanimated';
-import { CameraView, useCameraPermissions } from 'expo-camera';
-import * as Location from 'expo-location';
-import { DeviceMotion } from 'expo-sensors';
-import { Component, memo, useEffect, useRef, useState } from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-  useWindowDimensions,
-} from 'react-native';
-import { router } from 'expo-router';
+import WebView from 'react-native-webview';
 
 import { useGeoData, type GeoPoint } from '@/context/geo-data-context';
 
@@ -204,6 +205,199 @@ function computeNavData(
   }
 
   return { isOnScreen, dist, edgeX, edgeY, arrowAngle };
+}
+
+// ── Mini Map ───────────────────────────────────────────────────────────────────
+const MINI_SMALL = 120;
+const MINI_LARGE = 240;
+
+function buildMiniMapHtml(lat: number, lng: number, points: GeoPoint[]): string {
+  const initialPoints = JSON.stringify(
+    points.map((p) => ({ lat: p.lat, lng: p.lng, color: p.color, name: p.name ?? '' })),
+  );
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    html,body{margin:0;padding:0;height:100%;background:#1a1a2e;overflow:hidden}
+    #map{width:100%;height:100%}
+    /* User location icon wrapper */
+    .user-wrap{width:60px;height:60px;position:relative}
+    /* Direction cone — rotated via JS */
+    #user-cone{position:absolute;top:0;left:0;transform-origin:30px 30px;transition:transform 0.15s linear}
+    /* Blue dot — always centered, never rotates */
+    .user-circle{
+      position:absolute;top:50%;left:50%;
+      transform:translate(-50%,-50%);
+      width:14px;height:14px;border-radius:50%;
+      background:#007AFF;border:2.5px solid #fff;
+      box-shadow:0 0 0 4px rgba(0,122,255,0.3),0 1px 6px rgba(0,0,0,0.5);
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+  var map = L.map('map',{
+    zoomControl:false,
+    attributionControl:false,
+    dragging:false,
+    touchZoom:false,
+    scrollWheelZoom:false,
+    doubleClickZoom:false,
+    keyboard:false
+  }).setView([${lat},${lng}],16);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+    maxZoom:19
+  }).addTo(map);
+
+  /* User location icon: SVG cone (rotatable) + blue dot (fixed) */
+  /* Cone path: 60° sector pointing UP from center (30,30), radius 26 */
+  var userIconHtml=[
+    '<div class="user-wrap">',
+      '<svg id="user-cone" width="60" height="60" viewBox="0 0 60 60">',
+        '<defs>',
+          '<radialGradient id="cg" cx="50%" cy="85%" r="90%" fx="50%" fy="85%">',
+            '<stop offset="0%" stop-color="#007AFF" stop-opacity="0.55"/>',
+            '<stop offset="100%" stop-color="#007AFF" stop-opacity="0.04"/>',
+          '</radialGradient>',
+        '</defs>',
+        '<path d="M30,30 L17,7 A26,26 0 0,1 43,7 Z" fill="url(#cg)" stroke="#007AFF" stroke-width="0.8" stroke-opacity="0.5"/>',
+      '</svg>',
+      '<div class="user-circle"></div>',
+    '</div>'
+  ].join('');
+
+  var userIcon=L.divIcon({className:'',html:userIconHtml,iconSize:[60,60],iconAnchor:[30,30]});
+  var userMarker=L.marker([${lat},${lng}],{icon:userIcon,interactive:false,zIndexOffset:1000}).addTo(map);
+
+  /* Rotate the cone to match device heading */
+  function updateHeading(deg){
+    var cone=document.getElementById('user-cone');
+    if(cone) cone.style.transform='rotate('+deg+'deg)';
+  }
+
+  /* Geo reference points */
+  var pointLayers=[];
+  function syncPoints(pts){
+    pointLayers.forEach(function(l){map.removeLayer(l);});
+    pointLayers=[];
+    pts.forEach(function(p){
+      var m=L.circleMarker([p.lat,p.lng],{
+        radius:5,
+        fillColor:p.color,
+        color:'#fff',
+        weight:1.5,
+        fillOpacity:0.9,
+        interactive:false
+      }).addTo(map);
+      pointLayers.push(m);
+    });
+  }
+  syncPoints(${initialPoints});
+
+  function handleRNMessage(raw){
+    try{
+      var msg=JSON.parse(raw);
+      if(msg.type==='updateLocation'){
+        userMarker.setLatLng([msg.lat,msg.lng]);
+        map.setView([msg.lat,msg.lng],16,{animate:false});
+      }
+      if(msg.type==='syncPoints'){
+        syncPoints(msg.points);
+      }
+      if(msg.type==='updateHeading'){
+        updateHeading(msg.heading);
+      }
+    }catch(e){}
+  }
+  document.addEventListener('message',function(e){handleRNMessage(e.data);});
+  window.addEventListener('message',function(e){handleRNMessage(e.data);});
+</script>
+</body>
+</html>`;
+}
+
+type MiniMapArProps = {
+  lat: number;
+  lng: number;
+  heading: number;
+  points: GeoPoint[];
+  expanded: boolean;
+  onToggle: () => void;
+  bottomOffset: number;
+};
+
+function MiniMapAr({ lat, lng, heading, points, expanded, onToggle, bottomOffset }: MiniMapArProps) {
+  const webViewRef = useRef<WebView>(null);
+  const [mapHtml] = useState(() => buildMiniMapHtml(lat, lng, points));
+  const sizeAnim = useSharedValue(MINI_SMALL);
+  const radiusAnim = useSharedValue(14);
+  // Track last sent heading to avoid spamming WebView with tiny changes
+  const lastHeadingRef = useRef<number>(-999);
+
+  // Animate size on expand/collapse
+  useEffect(() => {
+    sizeAnim.value = withTiming(expanded ? MINI_LARGE : MINI_SMALL, { duration: 220, easing: Easing.out(Easing.quad) });
+    radiusAnim.value = withTiming(expanded ? 16 : 14, { duration: 220, easing: Easing.out(Easing.quad) });
+  }, [expanded]);
+
+  // Update marker position as GPS updates arrive
+  useEffect(() => {
+    webViewRef.current?.injectJavaScript(
+      `handleRNMessage(${JSON.stringify(JSON.stringify({ type: 'updateLocation', lat, lng }))});true;`,
+    );
+  }, [lat, lng]);
+
+  // Rotate direction cone — skip updates smaller than 2° to avoid WebView spam
+  useEffect(() => {
+    const prev = lastHeadingRef.current;
+    // Correct circular difference (works even when prev starts at -999)
+    const diff = ((heading - prev) % 360 + 360) % 360;   // 0–359
+    const wrapped = diff > 180 ? 360 - diff : diff;        // 0–180
+    if (prev !== -999 && wrapped < 2) return;
+    lastHeadingRef.current = heading;
+    webViewRef.current?.injectJavaScript(`updateHeading(${heading});true;`);
+  }, [heading]);
+
+  // Sync geo points when visibility changes
+  useEffect(() => {
+    const pts = points.map((p) => ({ lat: p.lat, lng: p.lng, color: p.color, name: p.name ?? '' }));
+    webViewRef.current?.injectJavaScript(`syncPoints(${JSON.stringify(pts)});true;`);
+  }, [points]);
+
+  const containerStyle = useAnimatedStyle(() => ({
+    width: sizeAnim.value,
+    height: sizeAnim.value,
+    borderRadius: radiusAnim.value,
+  }));
+
+  return (
+    <Animated.View style={[styles.miniMapContainer, containerStyle, { bottom: bottomOffset }]} pointerEvents="box-none">
+      <Pressable style={StyleSheet.absoluteFill} onPress={onToggle}>
+        <WebView
+          ref={webViewRef}
+          source={{ html: mapHtml }}
+          style={styles.miniMapWebView}
+          scrollEnabled={false}
+          originWhitelist={['*']}
+          javaScriptEnabled
+          domStorageEnabled
+          mixedContentMode="always"
+          allowUniversalAccessFromFileURLs
+          pointerEvents="none"
+        />
+      </Pressable>
+      {/* Expand/collapse indicator */}
+      <View style={styles.miniMapToggleIcon} pointerEvents="none">
+        <Text style={styles.miniMapToggleText}>{expanded ? '⤡' : '⤢'}</Text>
+      </View>
+    </Animated.View>
+  );
 }
 
 // ── ArMarker ───────────────────────────────────────────────────────────────────
@@ -481,6 +675,7 @@ function ArScreen() {
   const [compassHeading, setCompassHeading] = useState(0);
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [miniMapExpanded, setMiniMapExpanded] = useState(false);
 
   const headingBuf = useRef<number[]>([]);
   const pitchBuf = useRef<number[]>([]);
@@ -749,6 +944,19 @@ function ArScreen() {
         />
       )}
 
+      {/* Mini map (bottom-left) — hidden when guide list is open */}
+      {userCoords && !showGuideList && (
+        <MiniMapAr
+          lat={userCoords.lat}
+          lng={userCoords.lng}
+          heading={compassHeading}
+          points={visiblePoints}
+          expanded={miniMapExpanded}
+          onToggle={() => setMiniMapExpanded((v) => !v)}
+          bottomOffset={navPoint && navData ? 96 : 20}
+        />
+      )}
+
       {/* Guide list panel */}
       {showGuideList && (
         <>
@@ -996,4 +1204,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center', alignItems: 'center',
   },
   closeText: { color: '#fff', fontSize: 18, fontWeight: '500' },
+
+  // ── Mini map ───────────────────────────────────────────────────────────────
+  miniMapContainer: {
+    position: 'absolute',
+    left: 20,
+    overflow: 'hidden',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.28)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 10,
+    elevation: 8,
+  },
+  miniMapWebView: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  miniMapToggleIcon: {
+    position: 'absolute',
+    top: 5,
+    right: 6,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    borderRadius: 6,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+  },
+  miniMapToggleText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
 });
