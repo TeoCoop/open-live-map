@@ -1,4 +1,5 @@
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { DeviceMotion } from 'expo-sensors';
@@ -22,6 +23,8 @@ import Animated, {
 import WebView from 'react-native-webview';
 
 import { useGeoData, type GeoPoint } from '@/context/geo-data-context';
+import { findMapsForLocation, isSafUri, useSavedMaps } from '@/context/saved-maps-context';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 // ── Error boundary (catches JS errors so they surface instead of silently crashing) ──
 class ArErrorBoundary extends Component<
@@ -252,7 +255,8 @@ function buildMiniMapHtml(lat: number, lng: number, points: GeoPoint[]): string 
   }).setView([${lat},${lng}],16);
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
-    maxZoom:19
+    maxZoom:19,
+    errorTileUrl:'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'
   }).addTo(map);
 
   /* User location icon: SVG cone (rotatable) + blue dot (fixed) */
@@ -317,10 +321,84 @@ function buildMiniMapHtml(lat: number, lng: number, points: GeoPoint[]): string 
   }
   document.addEventListener('message',function(e){handleRNMessage(e.data);});
   window.addEventListener('message',function(e){handleRNMessage(e.data);});
+
+  // ── Offline basemap (simplified — roads + water only, no fitBounds) ─────────
+  var _offChunks=[];
+  function receiveChunk(chunk,i,total,isLast){
+    _offChunks.push(chunk);
+    if(isLast){
+      var raw=_offChunks.join('');_offChunks=[];
+      setTimeout(function(){loadOfflineData(raw);},30);
+    }
+  }
+  function loadOfflineData(raw){
+    if(raw.trimStart().charAt(0)==='{'){
+      try{renderGeoJSONMini(JSON.parse(raw));}catch(e){}
+    } else {
+      renderOSMMini(raw);
+    }
+  }
+  function renderGeoJSONMini(geojson){
+    try{
+      L.geoJSON(geojson,{
+        style:function(){return{color:'#4a90d9',weight:1.5,fillOpacity:0.18,opacity:0.6};},
+        pointToLayer:function(){return null;}
+      }).addTo(map);
+    }catch(e){}
+  }
+  function renderOSMMini(xml){
+    try{
+      var parser=new DOMParser();
+      var doc=parser.parseFromString(xml,'text/xml');
+      if(doc.querySelector('parsererror'))return;
+      var nodes=Object.create(null);
+      var nodeEls=doc.querySelectorAll('node');
+      for(var i=0;i<nodeEls.length;i++){
+        var n=nodeEls[i];
+        var nlat=parseFloat(n.getAttribute('lat'));
+        var nlon=parseFloat(n.getAttribute('lon'));
+        if(!isNaN(nlat)&&!isNaN(nlon))nodes[n.getAttribute('id')]=[nlat,nlon];
+      }
+      var layerWater=L.layerGroup();
+      var layerRoad=L.layerGroup();
+      var wayEls=doc.querySelectorAll('way');
+      for(var w=0;w<wayEls.length;w++){
+        var way=wayEls[w];
+        var latlngs=[];
+        var nds=way.querySelectorAll('nd');
+        for(var nd=0;nd<nds.length;nd++){
+          var coord=nodes[nds[nd].getAttribute('ref')];
+          if(coord)latlngs.push(coord);
+        }
+        if(latlngs.length<2)continue;
+        var tags=Object.create(null);
+        var tagEls=way.querySelectorAll('tag');
+        for(var t=0;t<tagEls.length;t++)tags[tagEls[t].getAttribute('k')]=tagEls[t].getAttribute('v');
+        var isClosed=latlngs.length>2&&latlngs[0][0]===latlngs[latlngs.length-1][0]&&latlngs[0][1]===latlngs[latlngs.length-1][1];
+        var hw=tags['highway'];
+        if(hw){
+          var clr=hw==='motorway'||hw==='trunk'?'#e06020':hw==='primary'?'#e0a020':hw==='secondary'?'#e0c840':'#bbbbbb';
+          var wt=hw==='motorway'||hw==='trunk'?2.5:hw==='primary'?2:hw==='secondary'?1.5:1;
+          L.polyline(latlngs,{color:clr,weight:wt,opacity:0.7}).addTo(layerRoad);
+          continue;
+        }
+        var ww=tags['waterway'],nat=tags['natural'],lu=tags['landuse'];
+        if(ww||nat==='water'||lu==='reservoir'||lu==='basin'){
+          if(isClosed)L.polygon(latlngs,{color:'#4a90d9',weight:0.8,fillColor:'#a8d4f5',fillOpacity:0.45,opacity:0.7}).addTo(layerWater);
+          else L.polyline(latlngs,{color:'#4a90d9',weight:1.5,opacity:0.7}).addTo(layerWater);
+        }
+      }
+      // No fitBounds — mini-mapa sigue centrado en el usuario
+      layerWater.addTo(map);
+      layerRoad.addTo(map);
+    }catch(e){}
+  }
 </script>
 </body>
 </html>`;
 }
+
+const MINI_CHUNK_SIZE = 180 * 1024;
 
 type MiniMapArProps = {
   lat: number;
@@ -330,11 +408,13 @@ type MiniMapArProps = {
   expanded: boolean;
   onToggle: () => void;
   bottomOffset: number;
+  offlineContent: string | null;
 };
 
-function MiniMapAr({ lat, lng, heading, points, expanded, onToggle, bottomOffset }: MiniMapArProps) {
+function MiniMapAr({ lat, lng, heading, points, expanded, onToggle, bottomOffset, offlineContent }: MiniMapArProps) {
   const webViewRef = useRef<WebView>(null);
   const [mapHtml] = useState(() => buildMiniMapHtml(lat, lng, points));
+  const [miniMapLoaded, setMiniMapLoaded] = useState(false);
   const sizeAnim = useSharedValue(MINI_SMALL);
   const radiusAnim = useSharedValue(14);
   // Track last sent heading to avoid spamming WebView with tiny changes
@@ -345,6 +425,21 @@ function MiniMapAr({ lat, lng, heading, points, expanded, onToggle, bottomOffset
     sizeAnim.value = withTiming(expanded ? MINI_LARGE : MINI_SMALL, { duration: 220, easing: Easing.out(Easing.quad) });
     radiusAnim.value = withTiming(expanded ? 16 : 14, { duration: 220, easing: Easing.out(Easing.quad) });
   }, [expanded]);
+
+  // Inject offline map data once mini-map WebView is ready
+  useEffect(() => {
+    if (!miniMapLoaded || !offlineContent) return;
+    (async () => {
+      const total = Math.ceil(offlineContent.length / MINI_CHUNK_SIZE);
+      for (let i = 0; i < total; i++) {
+        const chunk = offlineContent.slice(i * MINI_CHUNK_SIZE, (i + 1) * MINI_CHUNK_SIZE);
+        webViewRef.current?.injectJavaScript(
+          `receiveChunk(${JSON.stringify(chunk)},${i},${total},${i === total - 1});true;`,
+        );
+        await new Promise<void>((r) => setTimeout(r, 8));
+      }
+    })();
+  }, [miniMapLoaded, offlineContent]);
 
   // Update marker position as GPS updates arrive
   useEffect(() => {
@@ -390,6 +485,7 @@ function MiniMapAr({ lat, lng, heading, points, expanded, onToggle, bottomOffset
           mixedContentMode="always"
           allowUniversalAccessFromFileURLs
           pointerEvents="none"
+          onLoad={() => setMiniMapLoaded(true)}
         />
       </Pressable>
       {/* Expand/collapse indicator */}
@@ -690,9 +786,28 @@ function ArScreen() {
   const bestAccuracyRef = useRef<number>(Infinity);
 
   const { visiblePoints } = useGeoData();
+  const { maps } = useSavedMaps();
+  const { isConnected } = useNetworkStatus();
+  const [offlineMapContent, setOfflineMapContent] = useState<string | null>(null);
   const { width, height } = useWindowDimensions();
 
   useEffect(() => { pointsRef.current = visiblePoints; }, [visiblePoints]);
+
+  // Load offline map content when device is offline and location is known
+  useEffect(() => {
+    if (isConnected || !userCoords || offlineMapContent !== null) return;
+    const matches = findMapsForLocation(maps, userCoords.lat, userCoords.lng);
+    if (matches.length === 0) return;
+    const target = matches[0];
+    (async () => {
+      try {
+        const content = isSafUri(target.filePath)
+          ? await FileSystem.StorageAccessFramework.readAsStringAsync(target.filePath)
+          : await FileSystem.readAsStringAsync(target.filePath);
+        setOfflineMapContent(content);
+      } catch { /* silencioso — mini-mapa sin basemap */ }
+    })();
+  }, [isConnected, userCoords, maps]);
 
   // Keep navPoint ref in sync
   const navPoint = visiblePoints.find((p) => p.id === navPointId) ?? null;
@@ -954,6 +1069,7 @@ function ArScreen() {
           expanded={miniMapExpanded}
           onToggle={() => setMiniMapExpanded((v) => !v)}
           bottomOffset={navPoint && navData ? 96 : 20}
+          offlineContent={offlineMapContent}
         />
       )}
 

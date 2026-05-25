@@ -22,7 +22,7 @@ const STEPS = [
   {
     n: 4,
     title: 'Cargá el archivo en la app',
-    body: 'Volvé a la pantalla Mapa interactivo y tocá "+ Cargar mapa". Podés cargar varios archivos GeoJSON a la vez.',
+    body: 'Volvé a la pantalla Mapa interactivo y tocá "+ Cargar geojson". Podés cargar varios archivos GeoJSON a la vez.',
   },
   {
     n: 5,

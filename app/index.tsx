@@ -3,8 +3,11 @@ import { router } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useSavedMaps } from '@/context/saved-maps-context';
+
 export default function LandingScreen() {
   const insets = useSafeAreaInsets();
+  const { maps } = useSavedMaps();
 
   return (
     <ScrollView
@@ -48,6 +51,25 @@ export default function LandingScreen() {
             </View>
           </View>
         </View>
+      </Pressable>
+
+      {/* ─── Mis mapas ────────────────────────────────────────────────────── */}
+      <View style={styles.labeledDivider}>
+        <View style={styles.dividerLine} />
+        <Text style={styles.sectionLabel}>Mis mapas</Text>
+        <View style={styles.dividerLine} />
+      </View>
+
+      <Pressable
+        style={({ pressed }) => [styles.mainCard, pressed && styles.mainCardPressed]}
+        onPress={() => router.push('/mis-mapas')}
+      >
+        <View style={styles.mainCardLeft}>
+          <View style={styles.mainCardText}>
+            <Text style={styles.mainCardTitle}>Mis mapas</Text>
+          </View>
+        </View>
+        <Text style={styles.arrow}>→</Text>
       </Pressable>
 
       {/* Divider */}
@@ -175,6 +197,26 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: 'rgba(255,255,255,0.1)',
     marginVertical: 8,
+  },
+
+  // ── Labeled divider (Mis mapas) ──────────────────────────────────────────────
+  labeledDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginVertical: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  sectionLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.3)',
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
 
   // ── Help section ─────────────────────────────────────────────────────────────

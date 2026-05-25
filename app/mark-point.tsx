@@ -1,3 +1,4 @@
+import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
@@ -6,10 +7,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView from 'react-native-webview';
 
 import { useGeoData } from '@/context/geo-data-context';
+import { findMapsForLocation, isSafUri, useSavedMaps } from '@/context/saved-maps-context';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 const PIN_COLOR = '#34C759';
 
 type Coord = { lat: number; lng: number };
+
+const CHUNK_SIZE = 180 * 1024;
+const BLANK_TILE = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 // ── Leaflet HTML ────────────────────────────────────────────────────────────────
 function buildMapHtml(lat: number, lng: number): string {
@@ -50,6 +56,7 @@ function buildMapHtml(lat: number, lng: number): string {
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
     maxZoom:19,
+    errorTileUrl:'${BLANK_TILE}',
     attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
@@ -92,6 +99,108 @@ function buildMapHtml(lat: number, lng: number): string {
   }
   document.addEventListener('message',function(e){handleRNMessage(e.data);});
   window.addEventListener('message',function(e){handleRNMessage(e.data);});
+
+  // ── Offline basemap renderer ────────────────────────────────────────────────
+  var _chunks = [];
+  function receiveChunk(chunk, i, total, isLast) {
+    _chunks.push(chunk);
+    if (isLast) {
+      var raw = _chunks.join(''); _chunks = [];
+      setTimeout(function(){ loadMapData(raw); }, 30);
+    }
+  }
+
+  function loadMapData(raw) {
+    if (raw.trimStart().charAt(0) === '{') {
+      try { renderGeoJSON(JSON.parse(raw)); } catch(e){}
+    } else {
+      renderOSM(raw);
+    }
+  }
+
+  function renderGeoJSON(geojson) {
+    try {
+      L.geoJSON(geojson, {
+        style: function() { return { color: '#4a90d9', weight: 2, fillOpacity: 0.2 }; },
+        pointToLayer: function() { return null; }
+      }).addTo(map);
+    } catch(e) {}
+  }
+
+  function renderOSM(xml) {
+    try {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(xml, 'text/xml');
+      if (doc.querySelector('parsererror')) return;
+
+      var nodes = Object.create(null);
+      var nodeEls = doc.querySelectorAll('node');
+      for (var i = 0; i < nodeEls.length; i++) {
+        var n = nodeEls[i];
+        var nlat = parseFloat(n.getAttribute('lat'));
+        var nlon = parseFloat(n.getAttribute('lon'));
+        if (!isNaN(nlat) && !isNaN(nlon)) nodes[n.getAttribute('id')] = [nlat, nlon];
+      }
+
+      var layerGreen    = L.layerGroup();
+      var layerWater    = L.layerGroup();
+      var layerBuilding = L.layerGroup();
+      var layerRoadMin  = L.layerGroup();
+      var layerRoadMaj  = L.layerGroup();
+
+      var wayEls = doc.querySelectorAll('way');
+      for (var w = 0; w < wayEls.length; w++) {
+        var way = wayEls[w];
+        var latlngs = [];
+        var nds = way.querySelectorAll('nd');
+        for (var nd = 0; nd < nds.length; nd++) {
+          var coord = nodes[nds[nd].getAttribute('ref')];
+          if (coord) latlngs.push(coord);
+        }
+        if (latlngs.length < 2) continue;
+
+        var tags = Object.create(null);
+        var tagEls = way.querySelectorAll('tag');
+        for (var t = 0; t < tagEls.length; t++)
+          tags[tagEls[t].getAttribute('k')] = tagEls[t].getAttribute('v');
+
+        var isClosed = latlngs.length > 2 &&
+          latlngs[0][0] === latlngs[latlngs.length-1][0] &&
+          latlngs[0][1] === latlngs[latlngs.length-1][1];
+
+        if (tags['building']) {
+          L.polygon(latlngs,{color:'#c4996b',weight:0.8,fillColor:'#d4b896',fillOpacity:0.65}).addTo(layerBuilding);
+          continue;
+        }
+        var hw = tags['highway'];
+        if (hw) {
+          var isMaj = hw==='motorway'||hw==='trunk'||hw==='primary'||hw==='secondary';
+          var clr = hw==='motorway'||hw==='trunk'?'#e06020':hw==='primary'?'#e0a020':hw==='secondary'?'#e0c840':hw==='cycleway'?'#4a90d9':'#cccccc';
+          var wt  = hw==='motorway'||hw==='trunk'?5:hw==='primary'?4:hw==='secondary'?3:hw==='tertiary'||hw==='residential'?2:1.2;
+          L.polyline(latlngs,{color:clr,weight:wt}).addTo(isMaj?layerRoadMaj:layerRoadMin);
+          continue;
+        }
+        var ww=tags['waterway'], nat=tags['natural'], lu=tags['landuse'];
+        if (ww||nat==='water'||lu==='reservoir'||lu==='basin') {
+          if (isClosed) L.polygon(latlngs,{color:'#4a90d9',weight:1,fillColor:'#a8d4f5',fillOpacity:0.6}).addTo(layerWater);
+          else L.polyline(latlngs,{color:'#4a90d9',weight:2}).addTo(layerWater);
+          continue;
+        }
+        var leisure=tags['leisure'];
+        if (nat==='wood'||nat==='scrub'||lu==='forest'||lu==='park'||lu==='grass'||lu==='meadow'||leisure==='park'||leisure==='garden'||leisure==='nature_reserve') {
+          if (isClosed) L.polygon(latlngs,{color:'#2d9a4e',weight:0.5,fillColor:'#a8d8b0',fillOpacity:0.45}).addTo(layerGreen);
+          continue;
+        }
+      }
+
+      // Add layers bottom-to-top (no fitBounds — keep user's current view)
+      layerGreen.addTo(map);
+      layerWater.addTo(map);
+      layerBuilding.addTo(map);
+      layerRoadMin.addTo(map);
+      layerRoadMaj.addTo(map);
+    } catch(e) {}
+  }
 </script>
 </body>
 </html>`;
@@ -100,6 +209,8 @@ function buildMapHtml(lat: number, lng: number): string {
 // ── Screen ──────────────────────────────────────────────────────────────────────
 export default function MarkPointScreen() {
   const { addFile } = useGeoData();
+  const { maps } = useSavedMaps();
+  const { isConnected } = useNetworkStatus();
   const webViewRef = useRef<WebView>(null);
   const insets = useSafeAreaInsets();
 
@@ -107,6 +218,9 @@ export default function MarkPointScreen() {
   const [userCoord, setUserCoord] = useState<Coord | null>(null);
   const [pinCoord, setPinCoord] = useState<Coord | null>(null);
   const [locating, setLocating] = useState(true);
+  const [webViewLoaded, setWebViewLoaded] = useState(false);
+  const [offlineNoMap, setOfflineNoMap] = useState(false);
+  const [offlineInjected, setOfflineInjected] = useState(false);
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -141,6 +255,33 @@ export default function MarkPointScreen() {
     })();
     return () => { sub?.remove(); };
   }, []);
+
+  // ── Offline basemap injection ─────────────────────────────────────────────
+  useEffect(() => {
+    if (!webViewLoaded || isConnected || !userCoord || offlineInjected) return;
+    const matches = findMapsForLocation(maps, userCoord.lat, userCoord.lng);
+    if (matches.length === 0) {
+      setOfflineNoMap(true);
+      return;
+    }
+    const target = matches[0];
+    setOfflineInjected(true);
+    (async () => {
+      try {
+        const content = isSafUri(target.filePath)
+          ? await FileSystem.StorageAccessFramework.readAsStringAsync(target.filePath)
+          : await FileSystem.readAsStringAsync(target.filePath);
+        const total = Math.ceil(content.length / CHUNK_SIZE);
+        for (let i = 0; i < total; i++) {
+          const chunk = content.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+          webViewRef.current?.injectJavaScript(
+            `receiveChunk(${JSON.stringify(chunk)},${i},${total},${i === total - 1});true;`,
+          );
+          await new Promise<void>((r) => setTimeout(r, 8));
+        }
+      } catch { /* silencioso */ }
+    })();
+  }, [webViewLoaded, isConnected, userCoord, maps]);
 
   function handleMyLocation() {
     if (!userCoord) return;
@@ -183,12 +324,35 @@ export default function MarkPointScreen() {
           source={{ html: mapHtml }}
           style={styles.map}
           onMessage={handleMessage}
+          onLoad={() => setWebViewLoaded(true)}
           originWhitelist={['*']}
           javaScriptEnabled
           domStorageEnabled
           mixedContentMode="always"
           allowUniversalAccessFromFileURLs
         />
+      )}
+
+      {/* Overlay: offline + sin mapa para la zona */}
+      {offlineNoMap && !isConnected && (
+        <View style={styles.offlineOverlay}>
+          <Text style={styles.offlineOverlayIcon}>🗺️</Text>
+          <Text style={styles.offlineOverlayTitle}>Sin conexión</Text>
+          <Text style={styles.offlineOverlayMsg}>
+            No hay mapas descargados para tu ubicación actual.
+          </Text>
+          <View style={styles.offlineOverlayBtns}>
+            <Pressable
+              style={styles.offlineBtn}
+              onPress={() => { router.back(); router.push('/mis-mapas'); }}
+            >
+              <Text style={styles.offlineBtnText}>Ir a Mis mapas</Text>
+            </Pressable>
+            <Pressable style={styles.offlineBtnSecondary} onPress={() => router.back()}>
+              <Text style={styles.offlineBtnSecondaryText}>Volver</Text>
+            </Pressable>
+          </View>
+        </View>
       )}
 
       {/* Floating header */}
@@ -199,6 +363,12 @@ export default function MarkPointScreen() {
         <View style={styles.titlePill}>
           <Text style={styles.titleText}>Marcar punto en mapa</Text>
         </View>
+        {/* Offline status pill */}
+        {!isConnected && !offlineNoMap && (
+          <View style={styles.offlinePill}>
+            <Text style={styles.offlinePillText}>⚡ Sin conexión · Mapa offline</Text>
+          </View>
+        )}
       </View>
 
       {/* Bottom panel */}
@@ -260,15 +430,15 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center', alignItems: 'center',
   },
-  backText: { color: '#fff', fontSize: 20, fontWeight: '500', lineHeight: 22 },
+  backText: {position: "absolute", color: '#fff', fontSize: 20, fontWeight: '500', bottom: 10 },
   titlePill: {
     backgroundColor: 'rgba(10,10,20,0.75)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 14, paddingVertical: 10,
+    paddingHorizontal: 12, paddingVertical: 8,
     borderRadius: 21,
   },
-  titleText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  titleText: { color: '#fff', fontSize: 12, fontWeight: '600' },
 
   // Bottom panel
   panel: {
@@ -305,4 +475,64 @@ const styles = StyleSheet.create({
   },
   saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
   btnDisabled: { opacity: 0.3 },
+
+  // ── Offline pill (header) ─────────────────────────────────────────────────
+  offlinePill: {
+    backgroundColor: 'rgba(255,165,0,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,165,0,0.35)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+  },
+  offlinePillText: {
+    color: '#FFB340',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+
+  // ── No-map overlay ────────────────────────────────────────────────────────
+  offlineOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10,10,15,0.93)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 32,
+    zIndex: 50,
+  },
+  offlineOverlayIcon: { fontSize: 48, marginBottom: 4 },
+  offlineOverlayTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  offlineOverlayMsg: {
+    fontSize: 15,
+    color: 'rgba(255,255,255,0.55)',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  offlineOverlayBtns: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 8,
+  },
+  offlineBtn: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+  },
+  offlineBtnText: { color: '#fff', fontWeight: '700', fontSize: 14 },
+  offlineBtnSecondary: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 20,
+    paddingVertical: 13,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+  },
+  offlineBtnSecondaryText: { color: 'rgba(255,255,255,0.65)', fontWeight: '500', fontSize: 14 },
 });

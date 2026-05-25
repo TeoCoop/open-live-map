@@ -1,9 +1,12 @@
 import * as DocumentPicker from 'expo-document-picker';
+import * as Location from 'expo-location';
 import { router } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { useGeoData, type GeoFile, type GeoPoint } from '@/context/geo-data-context';
+import { findMapsForLocation, useSavedMaps } from '@/context/saved-maps-context';
+import { useNetworkStatus } from '@/hooks/useNetworkStatus';
 
 const DEFAULT_COLOR = '#4A90E2';
 
@@ -127,7 +130,24 @@ function Checkbox({ checked, onPress }: { checked: boolean; onPress: () => void 
 export default function MapaScreen() {
   const { files, addFile, removeFile, selectedIds, togglePoint, setFileSelection, visiblePoints, allPoints } =
     useGeoData();
+  const { maps: savedMaps } = useSavedMaps();
+  const { isConnected } = useNetworkStatus();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
+
+  // When offline, get a one-shot GPS fix to filter maps by location
+  useEffect(() => {
+    if (isConnected || userLocation) return;
+    Location.requestForegroundPermissionsAsync()
+      .then(({ status }) => {
+        if (status !== 'granted') return;
+        return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      })
+      .then((loc) => {
+        if (loc) setUserLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+      })
+      .catch(() => {});
+  }, [isConnected]);
 
   function toggleExpand(fileId: string) {
     setExpandedIds((prev) => {
@@ -175,7 +195,7 @@ export default function MapaScreen() {
           style={({ pressed }) => [styles.primaryBtn, pressed && styles.primaryBtnPressed]}
           onPress={handleLoadGeoJSON}
         >
-          <Text style={styles.primaryBtnText}>+ Cargar mapa</Text>
+          <Text style={styles.primaryBtnText}>+ Cargar geojson</Text>
         </Pressable>
 
         <Pressable
@@ -221,6 +241,78 @@ export default function MapaScreen() {
             </View>
           );
         })}
+        {/* ── Mapas offline ────────────────────────────────────────────── */}
+
+        {/* Offline banner */}
+        {!isConnected && (
+          <View style={styles.offlineBanner}>
+            <Text style={styles.offlineBannerText}>🔴 Sin conexión — usando mapas offline</Text>
+          </View>
+        )}
+
+        <View style={styles.offlineDivider}>
+          <View style={styles.offlineLine} />
+          <Text style={styles.offlineLabel}>MAPA OFFLINE</Text>
+          <View style={styles.offlineLine} />
+        </View>
+
+        {(() => {
+          // When offline: filter maps by user location (if known), else show all
+          const mapsToShow = !isConnected && userLocation
+            ? findMapsForLocation(savedMaps, userLocation.lat, userLocation.lng)
+            : savedMaps;
+
+          if (savedMaps.length === 0) {
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.emptyOfflineCard, pressed && { opacity: 0.7 }]}
+                onPress={() => router.push('/mis-mapas')}
+              >
+                <Text style={styles.emptyOfflineIcon}>🗺️</Text>
+                <Text style={styles.emptyOfflineText}>
+                  No tenés mapas guardados.{'\n'}
+                  <Text style={styles.emptyOfflineLink}>Ir a Mis mapas →</Text>
+                </Text>
+              </Pressable>
+            );
+          }
+
+          if (!isConnected && userLocation && mapsToShow.length === 0) {
+            return (
+              <Pressable
+                style={({ pressed }) => [styles.emptyOfflineCard, pressed && { opacity: 0.7 }]}
+                onPress={() => router.push('/mis-mapas')}
+              >
+                <Text style={styles.emptyOfflineIcon}>📍</Text>
+                <Text style={styles.emptyOfflineText}>
+                  No hay mapas descargados para tu ubicación actual.{'\n'}
+                  <Text style={styles.emptyOfflineLink}>Ir a Mis mapas →</Text>
+                </Text>
+              </Pressable>
+            );
+          }
+
+          return mapsToShow.map((m) => (
+            <Pressable
+              key={m.id}
+              style={({ pressed }) => [styles.offlineMapCard, pressed && styles.offlineMapCardPressed]}
+              onPress={() => router.push(`/ver-mapa-offline?id=${m.id}`)}
+            >
+              <Text style={styles.offlineMapIcon}>🗺</Text>
+              <View style={styles.offlineMapInfo}>
+                <Text style={styles.offlineMapName} numberOfLines={1}>{m.name}</Text>
+                <Text style={styles.offlineMapMeta}>
+                  {m.source === 'downloaded' ? 'Descargado' : 'Cargado'} ·{' '}
+                  {m.fileSize < 1024 * 1024
+                    ? `${(m.fileSize / 1024).toFixed(0)} KB`
+                    : `${(m.fileSize / (1024 * 1024)).toFixed(1)} MB`}
+                </Text>
+              </View>
+              <Text style={styles.offlineMapArrow}>→</Text>
+            </Pressable>
+          ));
+        })()}
+
       </ScrollView>
 
       {/* Sticky bottom */}
@@ -342,4 +434,95 @@ const styles = StyleSheet.create({
   },
   verBtnDisabled: { backgroundColor: 'rgba(0,122,255,0.25)', boxShadow: 'none' },
   verBtnText: { color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: 0.3 },
+
+  // ── Offline banner ────────────────────────────────────────────────────────
+  offlineBanner: {
+    backgroundColor: 'rgba(255,59,48,0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,59,48,0.3)',
+    borderRadius: 12,
+    borderCurve: 'continuous',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  offlineBannerText: {
+    color: '#FF453A',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+
+  // ── Offline maps section ──────────────────────────────────────────────────
+  offlineDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 4,
+  },
+  offlineLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  offlineLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.28)',
+    letterSpacing: 1,
+  },
+
+  emptyOfflineCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+  },
+  emptyOfflineIcon: { fontSize: 24 },
+  emptyOfflineText: {
+    flex: 1,
+    fontSize: 13,
+    color: 'rgba(255,255,255,0.35)',
+    lineHeight: 19,
+  },
+  emptyOfflineLink: {
+    color: '#007AFF',
+    fontWeight: '600',
+  },
+
+  offlineMapCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+  },
+  offlineMapCardPressed: {
+    backgroundColor: 'rgba(255,255,255,0.10)',
+  },
+  offlineMapIcon: { fontSize: 22 },
+  offlineMapInfo: { flex: 1, gap: 2 },
+  offlineMapName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.85)',
+  },
+  offlineMapMeta: {
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.35)',
+  },
+  offlineMapArrow: {
+    fontSize: 16,
+    color: 'rgba(255,255,255,0.28)',
+  },
 });
