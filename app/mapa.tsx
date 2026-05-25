@@ -329,7 +329,7 @@ export default function MapaScreen() {
           disabled={visiblePoints.length === 0}
         >
           <Text style={styles.verBtnText}>
-            {visiblePoints.length > 0 ? `Ver en AR  (${visiblePoints.length})` : 'Ver en AR'}
+            {visiblePoints.length > 0 ? `Ver  (${visiblePoints.length})` : 'Ver'}
           </Text>
         </Pressable>
       </View>

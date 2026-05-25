@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView from 'react-native-webview';
 
@@ -94,6 +94,11 @@ function buildMapHtml(lat: number, lng: number): string {
         var ll = userMarker.getLatLng();
         map.setView(ll,17,{animate:true});
         placePin(ll);
+      }
+      if(msg.type==='placeAtCoord'){
+        var cl = L.latLng(msg.lat, msg.lng);
+        map.setView(cl,17,{animate:true});
+        placePin(cl);
       }
     }catch(e){}
   }
@@ -221,6 +226,9 @@ export default function MarkPointScreen() {
   const [webViewLoaded, setWebViewLoaded] = useState(false);
   const [offlineNoMap, setOfflineNoMap] = useState(false);
   const [offlineInjected, setOfflineInjected] = useState(false);
+  const [showCoordInput, setShowCoordInput] = useState(false);
+  const [inputLat, setInputLat] = useState('');
+  const [inputLng, setInputLng] = useState('');
 
   useEffect(() => {
     let sub: Location.LocationSubscription | null = null;
@@ -297,6 +305,24 @@ export default function MarkPointScreen() {
     } catch { /* ignore */ }
   }
 
+  function handleGoToCoord() {
+    const lat = parseFloat(inputLat.replace(',', '.'));
+    const lng = parseFloat(inputLng.replace(',', '.'));
+    if (isNaN(lat) || lat < -90 || lat > 90) {
+      // shake / highlight — just keep modal open, user can fix
+      return;
+    }
+    if (isNaN(lng) || lng < -180 || lng > 180) {
+      return;
+    }
+    webViewRef.current?.injectJavaScript(
+      `handleRNMessage(${JSON.stringify(JSON.stringify({ type: 'placeAtCoord', lat, lng }))});true;`,
+    );
+    setShowCoordInput(false);
+    setInputLat('');
+    setInputLng('');
+  }
+
   function handleSave() {
     if (!pinCoord) return;
     const id = `marked-${Date.now()}`;
@@ -371,6 +397,58 @@ export default function MarkPointScreen() {
         )}
       </View>
 
+      {/* Coordinate input modal */}
+      {showCoordInput && (
+        <KeyboardAvoidingView
+          style={styles.coordModal}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setShowCoordInput(false)} />
+          <View style={[styles.coordSheet, { paddingBottom: insets.bottom + 20 }]}>
+            <View style={styles.coordSheetHandle} />
+            <Text style={styles.coordSheetTitle}>Ingresar coordenadas</Text>
+            <View style={styles.coordInputRow}>
+              <View style={styles.coordInputWrap}>
+                <Text style={styles.coordInputLabel}>Latitud</Text>
+                <TextInput
+                  style={styles.coordInput}
+                  placeholder="-34.60370"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  keyboardType="numbers-and-punctuation"
+                  value={inputLat}
+                  onChangeText={setInputLat}
+                  returnKeyType="next"
+                  autoFocus
+                />
+              </View>
+              <View style={styles.coordInputWrap}>
+                <Text style={styles.coordInputLabel}>Longitud</Text>
+                <TextInput
+                  style={styles.coordInput}
+                  placeholder="-58.38160"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  keyboardType="numbers-and-punctuation"
+                  value={inputLng}
+                  onChangeText={setInputLng}
+                  returnKeyType="done"
+                  onSubmitEditing={handleGoToCoord}
+                />
+              </View>
+            </View>
+            <Pressable
+              style={[
+                styles.coordConfirmBtn,
+                (!inputLat || !inputLng) && styles.btnDisabled,
+              ]}
+              onPress={handleGoToCoord}
+              disabled={!inputLat || !inputLng}
+            >
+              <Text style={styles.coordConfirmBtnText}>Ir al punto →</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
+      )}
+
       {/* Bottom panel */}
       {!locating && (
         <View style={[styles.panel, { paddingBottom: insets.bottom + 20 }]}>
@@ -386,18 +464,17 @@ export default function MarkPointScreen() {
           )}
           <View style={styles.btnRow}>
             <Pressable
-              style={[styles.secondaryBtn, !userCoord && styles.btnDisabled]}
-              onPress={handleMyLocation}
-              disabled={!userCoord}
+              style={styles.secondaryBtn}
+              onPress={() => setShowCoordInput(true)}
             >
-              <Text style={styles.secondaryBtnText}>Mi ubicación</Text>
+              <Text style={styles.secondaryBtnText}>Coordenadas</Text>
             </Pressable>
             <Pressable
               style={[styles.saveBtn, !pinCoord && styles.btnDisabled]}
               onPress={handleSave}
               disabled={!pinCoord}
             >
-              <Text style={styles.saveBtnText}>Guardar punto</Text>
+              <Text style={styles.saveBtnText}>Guardar</Text>
             </Pressable>
           </View>
         </View>
@@ -535,4 +612,74 @@ const styles = StyleSheet.create({
     borderCurve: 'continuous',
   },
   offlineBtnSecondaryText: { color: 'rgba(255,255,255,0.65)', fontWeight: '500', fontSize: 14 },
+
+  // ── Coordinate input modal ────────────────────────────────────────────────
+  coordModal: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    zIndex: 60,
+  },
+  coordSheet: {
+    backgroundColor: '#0f0f1a',
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 20,
+    paddingTop: 16,
+    gap: 16,
+  },
+  coordSheetHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignSelf: 'center',
+    marginBottom: 4,
+  },
+  coordSheetTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  coordInputRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  coordInputWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  coordInputLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.4)',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  coordInput: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    borderCurve: 'continuous',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    color: '#fff',
+    fontSize: 15,
+    fontVariant: ['tabular-nums'],
+  },
+  coordConfirmBtn: {
+    backgroundColor: PIN_COLOR,
+    paddingVertical: 16,
+    borderRadius: 14,
+    borderCurve: 'continuous',
+    alignItems: 'center',
+  },
+  coordConfirmBtnText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
 });

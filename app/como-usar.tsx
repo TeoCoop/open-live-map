@@ -27,7 +27,7 @@ const STEPS = [
   {
     n: 5,
     title: 'Seleccioná y explorá en AR',
-    body: 'Desplegá cada archivo para ver sus puntos. Tildá los que querés ver, tocá "Ver en AR" y apuntá la cámara hacia esos lugares para verlos en realidad aumentada.',
+    body: 'Desplegá cada archivo para ver sus puntos. Tildá los que querés ver, tocá "Ver" y apuntá la cámara hacia esos lugares para verlos en realidad aumentada.',
   },
 ] as const;
 

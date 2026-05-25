@@ -5,10 +5,13 @@ import { router } from 'expo-router';
 import { DeviceMotion } from 'expo-sensors';
 import { Component, memo, useEffect, useRef, useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -772,6 +775,10 @@ function ArScreen() {
   const [gpsAccuracy, setGpsAccuracy] = useState<number | null>(null);
   const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [miniMapExpanded, setMiniMapExpanded] = useState(false);
+  const [showPinInput, setShowPinInput] = useState(false);
+  const [pinInputLat, setPinInputLat] = useState('');
+  const [pinInputLng, setPinInputLng] = useState('');
+  const [pinInputName, setPinInputName] = useState('');
 
   const headingBuf = useRef<number[]>([]);
   const pitchBuf = useRef<number[]>([]);
@@ -785,7 +792,7 @@ function ArScreen() {
   // Tracks best GPS accuracy seen this session — used to filter regressions
   const bestAccuracyRef = useRef<number>(Infinity);
 
-  const { visiblePoints } = useGeoData();
+  const { visiblePoints, addFile, setFileSelection } = useGeoData();
   const { maps } = useSavedMaps();
   const { isConnected } = useNetworkStatus();
   const [offlineMapContent, setOfflineMapContent] = useState<string | null>(null);
@@ -969,6 +976,25 @@ function ArScreen() {
     setShowGuideList(false);
   }
 
+  function handleAddManualPin() {
+    const lat = parseFloat(pinInputLat.replace(',', '.'));
+    const lng = parseFloat(pinInputLng.replace(',', '.'));
+    if (isNaN(lat) || lat < -90 || lat > 90) return;
+    if (isNaN(lng) || lng < -180 || lng > 180) return;
+    const id = `ar-pin-${Date.now()}`;
+    const name = pinInputName.trim() || `Pin ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+    addFile({
+      id,
+      name,
+      points: [{ id: `${id}-0`, lat, lng, name, color: '#FF453A' }],
+    });
+    setFileSelection(id, true);
+    setShowPinInput(false);
+    setPinInputLat('');
+    setPinInputLng('');
+    setPinInputName('');
+  }
+
   // ── Guards ────────────────────────────────────────────────────────────────
   if (!cameraPermission) return <View style={styles.container} />;
 
@@ -1043,6 +1069,11 @@ function ArScreen() {
         <Text style={styles.closeText}>✕</Text>
       </Pressable>
 
+      {/* Pin button — above guide button */}
+      <Pressable style={styles.pinBtn} onPress={() => setShowPinInput(true)}>
+        <Text style={styles.pinBtnIcon}>📍</Text>
+      </Pressable>
+
       <GuideButton
         onPress={() => setShowGuideList(true)}
         active={navPointId !== null}
@@ -1087,6 +1118,82 @@ function ArScreen() {
             onClose={() => setShowGuideList(false)}
           />
         </>
+      )}
+
+      {/* Manual pin input panel */}
+      {showPinInput && (
+        <KeyboardAvoidingView
+          style={StyleSheet.absoluteFill}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          pointerEvents="box-none"
+        >
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setShowPinInput(false)}
+          />
+          <View style={styles.pinPanel}>
+            <View style={styles.pinPanelHandle} />
+            <View style={styles.pinPanelHeader}>
+              <Text style={styles.pinPanelTitle}>Agregar punto por coordenadas</Text>
+              <Pressable onPress={() => setShowPinInput(false)} hitSlop={12}>
+                <Text style={styles.pinPanelClose}>✕</Text>
+              </Pressable>
+            </View>
+            <Text style={styles.pinPanelSub}>El punto se mostrará inmediatamente en AR</Text>
+
+            <View style={styles.pinInputRow}>
+              <View style={styles.pinInputWrap}>
+                <Text style={styles.pinInputLabel}>LATITUD</Text>
+                <TextInput
+                  style={styles.pinInput}
+                  placeholder="-34.60370"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  keyboardType="numbers-and-punctuation"
+                  value={pinInputLat}
+                  onChangeText={setPinInputLat}
+                  returnKeyType="next"
+                  autoFocus
+                />
+              </View>
+              <View style={styles.pinInputWrap}>
+                <Text style={styles.pinInputLabel}>LONGITUD</Text>
+                <TextInput
+                  style={styles.pinInput}
+                  placeholder="-58.38160"
+                  placeholderTextColor="rgba(255,255,255,0.2)"
+                  keyboardType="numbers-and-punctuation"
+                  value={pinInputLng}
+                  onChangeText={setPinInputLng}
+                  returnKeyType="next"
+                />
+              </View>
+            </View>
+
+            <View style={styles.pinInputWrap}>
+              <Text style={styles.pinInputLabel}>NOMBRE (opcional)</Text>
+              <TextInput
+                style={styles.pinInput}
+                placeholder="Ej: Sala de reuniones"
+                placeholderTextColor="rgba(255,255,255,0.2)"
+                value={pinInputName}
+                onChangeText={setPinInputName}
+                returnKeyType="done"
+                onSubmitEditing={handleAddManualPin}
+              />
+            </View>
+
+            <Pressable
+              style={[
+                styles.pinConfirmBtn,
+                (!pinInputLat || !pinInputLng) && styles.pinConfirmBtnDisabled,
+              ]}
+              onPress={handleAddManualPin}
+              disabled={!pinInputLat || !pinInputLng}
+            >
+              <Text style={styles.pinConfirmBtnText}>Agregar punto en AR</Text>
+            </Pressable>
+          </View>
+        </KeyboardAvoidingView>
       )}
     </View>
   );
@@ -1352,4 +1459,74 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+
+  // ── Pin button (above guide) ────────────────────────────────────────────────
+  pinBtn: {
+    position: 'absolute',
+    bottom: 168,   // guideBtn.bottom(108) + guideBtn.height(48) + gap(12)
+    right: 20,
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center', alignItems: 'center',
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
+  },
+  pinBtnIcon: { fontSize: 22 },
+
+  // ── Pin input panel ─────────────────────────────────────────────────────────
+  pinPanel: {
+    position: 'absolute',
+    bottom: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(10,10,10,0.97)',
+    borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 20,
+    paddingTop: 14,
+    paddingBottom: 40,
+    gap: 14,
+  },
+  pinPanelHandle: {
+    width: 40, height: 4, borderRadius: 2,
+    backgroundColor: 'rgba(255,255,255,0.25)',
+    alignSelf: 'center', marginBottom: 4,
+  },
+  pinPanelHeader: {
+    flexDirection: 'row', alignItems: 'center',
+  },
+  pinPanelTitle: {
+    flex: 1, color: '#fff', fontSize: 17, fontWeight: '700',
+  },
+  pinPanelClose: {
+    color: 'rgba(255,255,255,0.5)', fontSize: 18, fontWeight: '600',
+  },
+  pinPanelSub: {
+    color: 'rgba(255,255,255,0.4)', fontSize: 13,
+    marginTop: -6,
+  },
+  pinInputRow: { flexDirection: 'row', gap: 12 },
+  pinInputWrap: { flex: 1, gap: 6 },
+  pinInputLabel: {
+    fontSize: 10, fontWeight: '700',
+    color: 'rgba(255,255,255,0.38)',
+    letterSpacing: 0.8,
+  },
+  pinInput: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 13,
+    color: '#fff', fontSize: 15,
+    fontVariant: ['tabular-nums'],
+  },
+  pinConfirmBtn: {
+    backgroundColor: '#FF453A',
+    paddingVertical: 16, borderRadius: 14,
+    alignItems: 'center', marginTop: 4,
+  },
+  pinConfirmBtnDisabled: {
+    backgroundColor: 'rgba(255,69,58,0.25)',
+  },
+  pinConfirmBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
