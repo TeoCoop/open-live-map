@@ -846,8 +846,8 @@ function ArScreen() {
     function applyPosition(lat: number, lng: number, accuracy: number | null | undefined) {
       const acc = accuracy ?? Infinity;
       const best = bestAccuracyRef.current;
-      // Block readings that are dramatically worse (likely a bad cell-tower fallback)
-      if (acc > best * 1.5) return;
+      // Only reject clear cell-tower fallbacks (accuracy > 300 m = no real GPS lock)
+      if (acc > 300) return;
       if (acc < best) bestAccuracyRef.current = acc;
       userLocRef.current = { lat, lng };
       setUserCoords({ lat, lng });
@@ -892,7 +892,7 @@ function ArScreen() {
 
     // High-accuracy continuous watch — refines position as satellite lock improves
     Location.watchPositionAsync(
-      { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 2, timeInterval: 1500 },
+      { accuracy: Location.Accuracy.BestForNavigation, distanceInterval: 0, timeInterval: 1000 },
       (loc) => { applyPosition(loc.coords.latitude, loc.coords.longitude, loc.coords.accuracy); },
     ).then((s) => { posSub = s; }).catch(() => {});
 
@@ -1064,11 +1064,6 @@ function ArScreen() {
       <CompassHud heading={compassHeading} />
       {userCoords && <GpsHud coords={userCoords} accuracy={gpsAccuracy} />}
 
-      {/* Top controls */}
-      <Pressable style={styles.closeBtn} onPress={() => router.back()}>
-        <Text style={styles.closeText}>✕</Text>
-      </Pressable>
-
       {/* Pin button — above guide button */}
       <Pressable style={styles.pinBtn} onPress={() => setShowPinInput(true)}>
         <Text style={styles.pinBtnIcon}>📍</Text>
@@ -1195,6 +1190,11 @@ function ArScreen() {
           </View>
         </KeyboardAvoidingView>
       )}
+
+      {/* Close button — rendered last so it always sits on top of every panel/backdrop */}
+      <Pressable style={styles.closeBtn} onPress={() => router.back()}>
+        <Text style={styles.closeText}>✕</Text>
+      </Pressable>
     </View>
   );
 }
