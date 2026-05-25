@@ -22,25 +22,24 @@ const STEPS = [
   {
     n: 4,
     title: 'Cargá el archivo en la app',
-    body: 'Volvé a la pantalla Mapa y tocá "+ Cargar mapa". Podés cargar varios archivos GeoJSON a la vez.',
+    body: 'Volvé a la pantalla Mapa interactivo y tocá "+ Cargar mapa". Podés cargar varios archivos GeoJSON a la vez.',
   },
   {
     n: 5,
     title: 'Seleccioná y explorá en AR',
-    body: 'Desplegá cada archivo para ver sus puntos. Tildá los que querés ver, tocá "Ver (N)" y apuntá la cámara hacia esos lugares para verlos en realidad aumentada.',
+    body: 'Desplegá cada archivo para ver sus puntos. Tildá los que querés ver, tocá "Ver en AR" y apuntá la cámara hacia esos lugares para verlos en realidad aumentada.',
   },
 ] as const;
 
 const STEP_COLORS = ['#007AFF', '#34C759', '#FF9500', '#AF52DE', '#FF3B30'];
 
-export default function HowToScreen() {
+export default function ComoUsarScreen() {
   return (
     <ScrollView
       style={styles.screen}
       contentContainerStyle={styles.content}
       showsVerticalScrollIndicator={false}
     >
-      <Text style={styles.title}>Cómo usar la app</Text>
       <Text style={styles.subtitle}>
         Seguí estos pasos para ver tus puntos de interés en realidad aumentada.
       </Text>
@@ -55,10 +54,10 @@ export default function HowToScreen() {
             <Text style={styles.stepBody}>{step.body}</Text>
             {'action' in step && step.action && (
               <Pressable
-                style={styles.linkButton}
+                style={styles.linkBtn}
                 onPress={() => Linking.openURL(step.action!.url)}
               >
-                <Text style={styles.linkButtonText}>{step.action.label}</Text>
+                <Text style={styles.linkBtnText}>{step.action.label}</Text>
               </Pressable>
             )}
           </View>
@@ -66,7 +65,7 @@ export default function HowToScreen() {
       ))}
 
       <View style={styles.tip}>
-        <Text style={styles.tipTitle}>Consejo</Text>
+        <Text style={styles.tipTitle}>💡  Consejo</Text>
         <Text style={styles.tipBody}>
           Cuanto más cerca estés de los puntos que marcaste, mejor funciona la precisión del GPS.
           Funciona mejor en espacios abiertos con buena señal.
@@ -77,96 +76,58 @@ export default function HowToScreen() {
 }
 
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#f0f0f5',
-  },
-  content: {
-    padding: 20,
-    paddingTop: 72,
-    paddingBottom: 48,
-    gap: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 4,
-  },
+  screen: { flex: 1, backgroundColor: '#0a0a0f' },
+  content: { padding: 20, paddingTop: 16, paddingBottom: 48, gap: 12 },
+
   subtitle: {
     fontSize: 15,
-    color: '#666',
+    color: 'rgba(255,255,255,0.45)',
     lineHeight: 22,
-    marginBottom: 8,
+    marginBottom: 4,
   },
 
   card: {
-    backgroundColor: '#fff',
-    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 16,
+    borderCurve: 'continuous',
     padding: 16,
     flexDirection: 'row',
     gap: 14,
     alignItems: 'flex-start',
   },
   stepBadge: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
-    marginTop: 1,
+    width: 34, height: 34, borderRadius: 17,
+    justifyContent: 'center', alignItems: 'center',
+    flexShrink: 0, marginTop: 1,
   },
-  stepNumber: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  cardBody: {
-    flex: 1,
-    gap: 6,
-  },
-  stepTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  stepBody: {
-    fontSize: 14,
-    color: '#555',
-    lineHeight: 20,
-  },
-  linkButton: {
+  stepNumber: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  cardBody: { flex: 1, gap: 6 },
+  stepTitle: { fontSize: 16, fontWeight: '600', color: '#ffffff' },
+  stepBody: { fontSize: 14, color: 'rgba(255,255,255,0.52)', lineHeight: 20 },
+
+  linkBtn: {
     alignSelf: 'flex-start',
-    marginTop: 4,
+    marginTop: 6,
     backgroundColor: '#007AFF',
     paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 8,
+    paddingVertical: 8,
+    borderRadius: 10,
+    borderCurve: 'continuous',
   },
-  linkButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  linkBtnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
 
   tip: {
-    backgroundColor: '#FFF8E7',
-    borderRadius: 14,
+    backgroundColor: 'rgba(255,149,0,0.12)',
+    borderRadius: 16,
+    borderCurve: 'continuous',
     padding: 16,
-    borderLeftWidth: 4,
+    borderLeftWidth: 3,
     borderLeftColor: '#FF9500',
-    gap: 4,
+    gap: 6,
     marginTop: 4,
   },
-  tipTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#996000',
-  },
-  tipBody: {
-    fontSize: 14,
-    color: '#664400',
-    lineHeight: 20,
-  },
+  tipTitle: { fontSize: 14, fontWeight: '700', color: '#FF9500' },
+  tipBody: { fontSize: 14, color: 'rgba(255,200,120,0.75)', lineHeight: 20 },
 });

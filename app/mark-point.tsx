@@ -2,6 +2,7 @@ import * as Location from 'expo-location';
 import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import WebView from 'react-native-webview';
 
 import { useGeoData } from '@/context/geo-data-context';
@@ -52,11 +53,9 @@ function buildMapHtml(lat: number, lng: number): string {
     attribution:'© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
   }).addTo(map);
 
-  /* User location dot */
   var userIcon = L.divIcon({className:'',html:'<div class="user-dot"></div>',iconSize:[16,16],iconAnchor:[8,8]});
   var userMarker = L.marker([${lat},${lng}],{icon:userIcon,interactive:false,zIndexOffset:1000}).addTo(map);
 
-  /* Pin marker */
   var pinIcon = L.divIcon({
     className:'',
     html:'<div class="pin-wrap"><div class="pin-head"></div><div class="pin-tail"></div></div>',
@@ -80,13 +79,10 @@ function buildMapHtml(lat: number, lng: number): string {
 
   map.on('click',function(e){ placePin(e.latlng); });
 
-  /* Messages from React Native */
   function handleRNMessage(raw){
     try{
       var msg = JSON.parse(raw);
-      if(msg.type==='updateLocation'){
-        userMarker.setLatLng([msg.lat,msg.lng]);
-      }
+      if(msg.type==='updateLocation'){ userMarker.setLatLng([msg.lat,msg.lng]); }
       if(msg.type==='goToMyLocation'){
         var ll = userMarker.getLatLng();
         map.setView(ll,17,{animate:true});
@@ -105,6 +101,7 @@ function buildMapHtml(lat: number, lng: number): string {
 export default function MarkPointScreen() {
   const { addFile } = useGeoData();
   const webViewRef = useRef<WebView>(null);
+  const insets = useSafeAreaInsets();
 
   const [mapHtml, setMapHtml] = useState<string | null>(null);
   const [userCoord, setUserCoord] = useState<Coord | null>(null);
@@ -124,10 +121,7 @@ export default function MarkPointScreen() {
         return;
       }
 
-      const loc = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      }).catch(() => null);
-
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
       const lat = loc?.coords.latitude ?? defaultLat;
       const lng = loc?.coords.longitude ?? defaultLng;
       setUserCoord({ lat, lng });
@@ -159,7 +153,7 @@ export default function MarkPointScreen() {
     try {
       const msg = JSON.parse(event.nativeEvent.data);
       if (msg.type === 'pin') setPinCoord({ lat: msg.lat, lng: msg.lng });
-    } catch { /* ignore malformed messages */ }
+    } catch { /* ignore */ }
   }
 
   function handleSave() {
@@ -170,19 +164,14 @@ export default function MarkPointScreen() {
     addFile({
       id,
       name: `Punto marcado ${label}`,
-      points: [{
-        id: `${id}-0`,
-        lat: pinCoord.lat,
-        lng: pinCoord.lng,
-        name: `Punto marcado ${label}`,
-        color: PIN_COLOR,
-      }],
+      points: [{ id: `${id}-0`, lat: pinCoord.lat, lng: pinCoord.lng, name: `Punto marcado ${label}`, color: PIN_COLOR }],
     });
     router.back();
   }
 
   return (
     <View style={styles.container}>
+      {/* Map or loading */}
       {locating || !mapHtml ? (
         <View style={styles.loading}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -202,8 +191,8 @@ export default function MarkPointScreen() {
         />
       )}
 
-      {/* Header */}
-      <View style={styles.header} pointerEvents="box-none">
+      {/* Floating header */}
+      <View style={[styles.header, { top: insets.top + 12 }]} pointerEvents="box-none">
         <Pressable style={styles.backBtn} onPress={() => router.back()}>
           <Text style={styles.backText}>←</Text>
         </Pressable>
@@ -214,7 +203,7 @@ export default function MarkPointScreen() {
 
       {/* Bottom panel */}
       {!locating && (
-        <View style={styles.panel}>
+        <View style={[styles.panel, { paddingBottom: insets.bottom + 20 }]}>
           {pinCoord ? (
             <View style={styles.coordRow}>
               <Text style={styles.coordPin}>📍</Text>
@@ -234,11 +223,11 @@ export default function MarkPointScreen() {
               <Text style={styles.secondaryBtnText}>Mi ubicación</Text>
             </Pressable>
             <Pressable
-              style={[styles.primaryBtn, !pinCoord && styles.btnDisabled]}
+              style={[styles.saveBtn, !pinCoord && styles.btnDisabled]}
               onPress={handleSave}
               disabled={!pinCoord}
             >
-              <Text style={styles.primaryBtnText}>Guardar punto</Text>
+              <Text style={styles.saveBtnText}>Guardar punto</Text>
             </Pressable>
           </View>
         </View>
@@ -249,64 +238,71 @@ export default function MarkPointScreen() {
 
 // ── Styles ──────────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#e8e0d8' },
+  container: { flex: 1, backgroundColor: '#0a0a0f' },
   map: { flex: 1 },
-  loading: {
-    flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12,
-  },
-  loadingText: { color: '#555', fontSize: 15 },
 
+  // Loading
+  loading: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 14, backgroundColor: '#0a0a0f' },
+  loadingText: { color: 'rgba(255,255,255,0.5)', fontSize: 15 },
+
+  // Floating header
   header: {
     position: 'absolute',
-    top: 56, left: 16, right: 16,
+    left: 16, right: 16,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
   },
   backBtn: {
-    width: 40, height: 40, borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.55)',
+    width: 42, height: 42, borderRadius: 21,
+    backgroundColor: 'rgba(10,10,20,0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
     justifyContent: 'center', alignItems: 'center',
   },
-  backText: { color: '#fff', fontSize: 22, fontWeight: '600', lineHeight: 24 },
+  backText: { color: '#fff', fontSize: 20, fontWeight: '500', lineHeight: 22 },
   titlePill: {
-    backgroundColor: 'rgba(0,0,0,0.55)',
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: 'rgba(10,10,20,0.75)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 21,
   },
   titleText: { color: '#fff', fontSize: 15, fontWeight: '600' },
 
+  // Bottom panel
   panel: {
     position: 'absolute',
     bottom: 0, left: 0, right: 0,
-    backgroundColor: 'rgba(10,10,10,0.9)',
+    backgroundColor: '#0f0f18',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: 'rgba(255,255,255,0.1)',
+    borderTopLeftRadius: 20, borderTopRightRadius: 20,
     paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 44,
+    paddingTop: 20,
     gap: 14,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
   },
-  hint: { color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center' },
+  hint: { color: 'rgba(255,255,255,0.35)', fontSize: 14, textAlign: 'center' },
   coordRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   coordPin: { fontSize: 16 },
   coordText: {
-    color: '#fff', fontSize: 13,
-    fontVariant: ['tabular-nums'],
-    letterSpacing: 0.2,
+    color: 'rgba(255,255,255,0.85)', fontSize: 13,
+    fontVariant: ['tabular-nums'], letterSpacing: 0.2,
   },
   btnRow: { flexDirection: 'row', gap: 10 },
   secondaryBtn: {
-    flex: 1, paddingVertical: 14, borderRadius: 12,
-    borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)',
+    flex: 1, paddingVertical: 14, borderRadius: 14,
+    borderCurve: 'continuous',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
     alignItems: 'center',
   },
-  secondaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '500' },
-  primaryBtn: {
-    flex: 1.6, paddingVertical: 14, borderRadius: 12,
+  secondaryBtnText: { color: 'rgba(255,255,255,0.75)', fontSize: 15, fontWeight: '500' },
+  saveBtn: {
+    flex: 1.6, paddingVertical: 14, borderRadius: 14,
+    borderCurve: 'continuous',
     backgroundColor: PIN_COLOR,
     alignItems: 'center',
   },
-  primaryBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  btnDisabled: { opacity: 0.35 },
+  saveBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  btnDisabled: { opacity: 0.3 },
 });

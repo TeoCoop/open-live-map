@@ -1,0 +1,48 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="cube" x1="310" y1="360" x2="714" y2="664" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#80bcff"/>
+      <stop offset="100%" stop-color="#007AFF"/>
+    </linearGradient>
+    <linearGradient id="frame" x1="220" y1="220" x2="804" y2="804" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#3d8fff"/>
+      <stop offset="100%" stop-color="#0055e0"/>
+    </linearGradient>
+  </defs>
+
+  <!--
+    Android adaptive icon safe zone = 66/108 ≈ 61% of image.
+    Icon lives within the safe zone → add extra padding.
+    Icon size: 1024 × 0.55 = 563px  (55% → comfortably inside safe zone)
+    scale = 563/24 = 23.458
+    translate = (1024 - 563) / 2 = 230
+  -->
+  <!-- Invisible rect to preserve full 1024×1024 page bounds for export tools -->
+  <rect width="1024" height="1024" fill="none"/>
+
+  <g transform="translate(230 230) scale(23.458)">
+
+    <path
+      d="M7 9.5L12 12
+         M7 9.5V14.5L12 17
+         M7 9.5L12 7L17 9.5
+         M12 12L17 9.5
+         M12 12V17
+         M17 9.5V14.5L12 17"
+      stroke="url(#cube)"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"/>
+
+    <path
+      d="M8 4H6C4.89543 4 4 4.89543 4 6V8
+         M8 20H6C4.89543 20 4 19.1046 4 18V16
+         M16 4H18C19.1046 4 20 4.89543 20 6V8
+         M16 20H18C19.1046 20 20 19.1046 20 18V16"
+      stroke="url(#frame)"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"/>
+
+  </g>
+</svg>

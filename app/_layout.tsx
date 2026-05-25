@@ -1,28 +1,31 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
+import { DarkTheme, ThemeProvider } from '@react-navigation/native';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import 'react-native-reanimated';
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
 import { GeoDataProvider } from '@/context/geo-data-context';
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
-
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
   return (
     <GeoDataProvider>
-      <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-        <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+      <ThemeProvider value={DarkTheme}>
+        <Stack
+          screenOptions={{
+            headerStyle: { backgroundColor: '#0f0f18' },
+            headerTintColor: '#ffffff',
+            headerShadowVisible: false,
+            headerTitleStyle: { color: '#ffffff', fontWeight: '600' },
+            contentStyle: { backgroundColor: '#0a0a0f' },
+          }}
+        >
+          <Stack.Screen name="index" options={{ headerShown: false }} />
+          <Stack.Screen name="mapa" options={{ title: 'Mapa interactivo' }} />
+          <Stack.Screen name="como-usar" options={{ title: 'Cómo usar' }} />
           <Stack.Screen name="ar" options={{ headerShown: false }} />
           <Stack.Screen name="mark-point" options={{ headerShown: false }} />
           <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
         </Stack>
-        <StatusBar style="auto" />
+        <StatusBar style="light" />
       </ThemeProvider>
     </GeoDataProvider>
   );

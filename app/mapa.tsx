@@ -53,7 +53,6 @@ const CSS_COLORS: Record<string, string> = {
 
 function resolveColor(raw: string | undefined | null): string {
   if (!raw) return DEFAULT_COLOR;
-  // Already hex or rgb — keep as-is
   if (raw.startsWith('#') || raw.startsWith('rgb')) return raw;
   const hex = CSS_COLORS[raw.toLowerCase()];
   return hex ?? DEFAULT_COLOR;
@@ -73,21 +72,13 @@ function extractPoints(geojson: any, fileName: string): GeoFile {
     if (geometry.type === 'Point') {
       const [lng, lat] = geometry.coordinates as number[];
       points.push({
-        id: `${fileId}-${idx}`,
-        lat,
-        lng,
+        id: `${fileId}-${idx}`, lat, lng,
         name: props?.name ?? props?.nombre ?? undefined,
         color: colorFrom(props),
       });
     } else if (geometry.type === 'MultiPoint') {
       (geometry.coordinates as number[][]).forEach(([lng, lat], i) => {
-        points.push({
-          id: `${fileId}-${idx}-${i}`,
-          lat,
-          lng,
-          name: props?.name ?? undefined,
-          color: colorFrom(props),
-        });
+        points.push({ id: `${fileId}-${idx}-${i}`, lat, lng, name: props?.name ?? undefined, color: colorFrom(props) });
       });
     }
   }
@@ -114,14 +105,7 @@ function fileSelectionState(file: GeoFile, selectedIds: Set<string>): SelectionS
   return 'partial';
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-function TriCheckbox({
-  state,
-  onPress,
-}: {
-  state: SelectionState;
-  onPress: () => void;
-}) {
+function TriCheckbox({ state, onPress }: { state: SelectionState; onPress: () => void }) {
   return (
     <Pressable style={styles.checkbox} onPress={onPress} hitSlop={8}>
       {state !== 'none' && (
@@ -140,7 +124,7 @@ function Checkbox({ checked, onPress }: { checked: boolean; onPress: () => void 
 }
 
 // ─── Main screen ──────────────────────────────────────────────────────────────
-export default function HomeScreen() {
+export default function MapaScreen() {
   const { files, addFile, removeFile, selectedIds, togglePoint, setFileSelection, visiblePoints, allPoints } =
     useGeoData();
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
@@ -156,25 +140,18 @@ export default function HomeScreen() {
 
   async function handleLoadGeoJSON() {
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['*/*'],
-        copyToCacheDirectory: true,
-        multiple: true,
-      });
+      const result = await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true, multiple: true });
       if (result.canceled) return;
 
       for (const asset of result.assets) {
         const text = await (await fetch(asset.uri)).text();
         const geojson = JSON.parse(text);
         const file = extractPoints(geojson, asset.name ?? 'archivo.geojson');
-
         if (file.points.length === 0) {
           Alert.alert('Sin puntos', `"${file.name}" no contiene geometrías de tipo Point.`);
           continue;
         }
-
         addFile(file);
-        // Auto-expand the newly loaded file
         setExpandedIds((prev) => new Set(prev).add(file.id));
       }
     } catch {
@@ -192,16 +169,23 @@ export default function HomeScreen() {
   return (
     <View style={styles.screen}>
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        <Text style={styles.title}>OpenLiveMap</Text>
 
-        <Pressable style={styles.loadButton} onPress={handleLoadGeoJSON}>
-          <Text style={styles.loadButtonText}>+ Cargar mapa</Text>
+        {/* Action buttons */}
+        <Pressable
+          style={({ pressed }) => [styles.primaryBtn, pressed && styles.primaryBtnPressed]}
+          onPress={handleLoadGeoJSON}
+        >
+          <Text style={styles.primaryBtnText}>+ Cargar mapa</Text>
         </Pressable>
 
-        <Pressable style={styles.markButton} onPress={() => router.push('/mark-point')}>
-          <Text style={styles.markButtonText}>📍 Marcar puntos en mapa</Text>
+        <Pressable
+          style={({ pressed }) => [styles.secondaryBtn, pressed && styles.secondaryBtnPressed]}
+          onPress={() => router.push('/mark-point')}
+        >
+          <Text style={styles.secondaryBtnText}>📍  Marcar puntos en mapa</Text>
         </Pressable>
 
+        {/* File cards */}
         {files.map((file) => {
           const expanded = expandedIds.has(file.id);
           const selState = fileSelectionState(file, selectedIds);
@@ -209,48 +193,31 @@ export default function HomeScreen() {
 
           return (
             <View key={file.id} style={styles.fileCard}>
-              {/* File header */}
               <View style={styles.fileHeader}>
-                <TriCheckbox
-                  state={selState}
-                  onPress={() => setFileSelection(file.id, selState !== 'all')}
-                />
+                <TriCheckbox state={selState} onPress={() => setFileSelection(file.id, selState !== 'all')} />
                 <Pressable style={styles.fileHeaderCenter} onPress={() => toggleExpand(file.id)}>
-                  <Text style={styles.fileName} numberOfLines={1}>
-                    {file.name}
-                  </Text>
+                  <Text style={styles.fileName} numberOfLines={1}>{file.name}</Text>
                   <Text style={styles.fileCount}>
                     {selCount}/{file.points.length} punto{file.points.length !== 1 ? 's' : ''}
                   </Text>
                 </Pressable>
                 <Text style={styles.expandArrow}>{expanded ? '▲' : '▼'}</Text>
-                <Pressable
-                  style={styles.deleteButton}
-                  onPress={() => handleRemove(file.id, file.name)}
-                  hitSlop={8}
-                >
-                  <Text style={styles.deleteText}>✕</Text>
+                <Pressable style={styles.deleteBtn} onPress={() => handleRemove(file.id, file.name)} hitSlop={8}>
+                  <Text style={styles.deleteBtnText}>✕</Text>
                 </Pressable>
               </View>
 
-              {/* Point list */}
-              {expanded &&
-                file.points.map((point) => (
-                  <Pressable
-                    key={point.id}
-                    style={styles.pointRow}
-                    onPress={() => togglePoint(point.id)}
-                  >
-                    <View style={[styles.pointColorDot, { backgroundColor: point.color }]} />
-                    <Text style={styles.pointName} numberOfLines={1}>
-                      {point.name ?? point.id}
-                    </Text>
-                    <Checkbox
-                      checked={selectedIds.has(point.id)}
-                      onPress={() => togglePoint(point.id)}
-                    />
-                  </Pressable>
-                ))}
+              {expanded && file.points.map((point) => (
+                <Pressable
+                  key={point.id}
+                  style={styles.pointRow}
+                  onPress={() => togglePoint(point.id)}
+                >
+                  <View style={[styles.pointDot, { backgroundColor: point.color }]} />
+                  <Text style={styles.pointName} numberOfLines={1}>{point.name ?? point.id}</Text>
+                  <Checkbox checked={selectedIds.has(point.id)} onPress={() => togglePoint(point.id)} />
+                </Pressable>
+              ))}
             </View>
           );
         })}
@@ -265,12 +232,12 @@ export default function HomeScreen() {
           <Text style={styles.hint}>Seleccioná al menos un punto para continuar</Text>
         )}
         <Pressable
-          style={[styles.verButton, visiblePoints.length === 0 && styles.verButtonDisabled]}
+          style={[styles.verBtn, visiblePoints.length === 0 && styles.verBtnDisabled]}
           onPress={() => router.push('/ar')}
           disabled={visiblePoints.length === 0}
         >
-          <Text style={styles.verButtonText}>
-            Ver{visiblePoints.length > 0 ? ` (${visiblePoints.length})` : ''}
+          <Text style={styles.verBtnText}>
+            {visiblePoints.length > 0 ? `Ver en AR  (${visiblePoints.length})` : 'Ver en AR'}
           </Text>
         </Pressable>
       </View>
@@ -278,173 +245,101 @@ export default function HomeScreen() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
+// ─── Styles (dark) ────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: '#f0f0f5',
-  },
-  scrollContent: {
-    padding: 20,
-    paddingTop: 72,
-    paddingBottom: 16,
-    gap: 12,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#1a1a1a',
-    marginBottom: 8,
-  },
+  screen: { flex: 1, backgroundColor: '#0a0a0f' },
+  scrollContent: { padding: 20, paddingTop: 16, paddingBottom: 16, gap: 12 },
 
-  // Load button
-  loadButton: {
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#007AFF',
-    borderRadius: 12,
-    paddingVertical: 14,
+  // Action buttons
+  primaryBtn: {
+    backgroundColor: '#007AFF',
+    borderRadius: 16,
+    borderCurve: 'continuous',
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  loadButtonText: {
-    color: '#007AFF',
-    fontSize: 17,
-    fontWeight: '600',
-  },
+  primaryBtnPressed: { backgroundColor: '#0066DD' },
+  primaryBtnText: { color: '#fff', fontSize: 17, fontWeight: '700' },
 
-  // Mark button
-  markButton: {
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#34C759',
-    borderRadius: 12,
-    paddingVertical: 14,
+  secondaryBtn: {
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 16,
+    borderCurve: 'continuous',
+    paddingVertical: 16,
     alignItems: 'center',
   },
-  markButtonText: {
-    color: '#34C759',
-    fontSize: 17,
-    fontWeight: '600',
-  },
+  secondaryBtnPressed: { backgroundColor: 'rgba(255,255,255,0.11)' },
+  secondaryBtnText: { color: 'rgba(255,255,255,0.8)', fontSize: 16, fontWeight: '500' },
 
   // File card
   fileCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.10)',
+    borderRadius: 16,
+    borderCurve: 'continuous',
     overflow: 'hidden',
   },
   fileHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 14,
     gap: 10,
   },
-  fileHeaderCenter: {
-    flex: 1,
+  fileHeaderCenter: { flex: 1 },
+  fileName: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
+  fileCount: { fontSize: 12, color: 'rgba(255,255,255,0.38)', marginTop: 2 },
+  expandArrow: { fontSize: 11, color: 'rgba(255,255,255,0.25)' },
+  deleteBtn: {
+    width: 26, height: 26, borderRadius: 13,
+    backgroundColor: 'rgba(255,69,58,0.18)',
+    justifyContent: 'center', alignItems: 'center',
   },
-  fileName: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#1a1a1a',
-  },
-  fileCount: {
-    fontSize: 12,
-    color: '#888',
-    marginTop: 1,
-  },
-  expandArrow: {
-    fontSize: 11,
-    color: '#aaa',
-  },
-  deleteButton: {
-    width: 26,
-    height: 26,
-    borderRadius: 13,
-    backgroundColor: '#FFE5E5',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  deleteText: {
-    color: '#FF3B30',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  deleteBtnText: { color: '#FF453A', fontSize: 12, fontWeight: '700' },
 
   // Point rows
   pointRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#ebebeb',
+    borderTopColor: 'rgba(255,255,255,0.07)',
     gap: 10,
   },
-  pointColorDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    flexShrink: 0,
-  },
-  pointName: {
-    flex: 1,
-    fontSize: 14,
-    color: '#333',
-  },
+  pointDot: { width: 12, height: 12, borderRadius: 6, flexShrink: 0 },
+  pointName: { flex: 1, fontSize: 14, color: 'rgba(255,255,255,0.72)' },
 
   // Checkbox
   checkbox: {
-    width: 22,
-    height: 22,
-    borderRadius: 6,
-    borderWidth: 2,
-    borderColor: '#007AFF',
-    justifyContent: 'center',
-    alignItems: 'center',
-    flexShrink: 0,
+    width: 22, height: 22, borderRadius: 6,
+    borderWidth: 1.5, borderColor: 'rgba(0,122,255,0.7)',
+    justifyContent: 'center', alignItems: 'center', flexShrink: 0,
   },
-  checkboxMark: {
-    color: '#007AFF',
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 14,
-  },
+  checkboxMark: { color: '#007AFF', fontSize: 13, fontWeight: '700', lineHeight: 14 },
 
-  // Bottom section
+  // Bottom
   bottom: {
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 16,
     paddingBottom: 36,
-    backgroundColor: '#f0f0f5',
-    gap: 8,
+    backgroundColor: '#0f0f18',
+    gap: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#ddd',
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
-  hint: {
-    textAlign: 'center',
-    color: '#aaa',
-    fontSize: 13,
-  },
-  verButton: {
+  hint: { textAlign: 'center', color: 'rgba(255,255,255,0.28)', fontSize: 13 },
+  verBtn: {
     backgroundColor: '#007AFF',
-    borderRadius: 14,
+    borderRadius: 16,
+    borderCurve: 'continuous',
     paddingVertical: 18,
     alignItems: 'center',
-    shadowColor: '#007AFF',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
+    boxShadow: '0 6px 24px rgba(0,122,255,0.35)',
   },
-  verButtonDisabled: {
-    backgroundColor: '#b0c8e8',
-    shadowOpacity: 0,
-    elevation: 0,
-  },
-  verButtonText: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '700',
-    letterSpacing: 0.5,
-  },
+  verBtnDisabled: { backgroundColor: 'rgba(0,122,255,0.25)', boxShadow: 'none' },
+  verBtnText: { color: '#fff', fontSize: 20, fontWeight: '700', letterSpacing: 0.3 },
 });

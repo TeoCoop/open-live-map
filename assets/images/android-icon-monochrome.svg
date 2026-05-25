@@ -1,0 +1,27 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Invisible rect to preserve full 1024×1024 page bounds for export tools -->
+  <rect width="1024" height="1024" fill="none"/>
+
+  <g transform="translate(230 230) scale(23.458)">
+    <path
+      d="M7 9.5L12 12
+         M7 9.5V14.5L12 17
+         M7 9.5L12 7L17 9.5
+         M12 12L17 9.5
+         M12 12V17
+         M17 9.5V14.5L12 17"
+      stroke="white"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"/>
+    <path
+      d="M8 4H6C4.89543 4 4 4.89543 4 6V8
+         M8 20H6C4.89543 20 4 19.1046 4 18V16
+         M16 4H18C19.1046 4 20 4.89543 20 6V8
+         M16 20H18C19.1046 20 20 19.1046 20 18V16"
+      stroke="white"
+      stroke-width="1.8"
+      stroke-linecap="round"
+      stroke-linejoin="round"/>
+  </g>
+</svg>
